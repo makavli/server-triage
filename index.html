@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-A2f2mcd/BW3kAya/QA/DGHbjgN6NM309F6JGr9xD79w='; style-src 'sha256-zFpBWP/sBovPMUWXhMxrJtDjAJYBpNKyRzseeARAYh0='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-vvyOjcZVn7k2QW9Hez32tghx7j1DTo0wWvgfi7/JgrA='; style-src 'sha256-zFpBWP/sBovPMUWXhMxrJtDjAJYBpNKyRzseeARAYh0='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
 <title>Server Triage Sheet</title>
 <meta name="description" content="Commands and error meanings for a broken host, service or database.">
 <meta name="color-scheme" content="light dark">
@@ -2558,9 +2558,9 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   const IN_CODE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/gu;
   const IN_VALUE = new RegExp(`${IN_CODE.source}|[\t\n]`, 'gu');
   const shown = (v, max, re) => str(v, max) && v.replace(re, '') === v;
-  // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, and
-  // no leading - that a command would read as an option. Ports and process IDs are digits.
-  const SAFE = /^(?!-)[\w.:/@+=,%-]{1,200}$/;
+  // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, no
+  // leading - that a command would read as an option, no -- that SQL would read as a comment. Ports and PIDs are digits.
+  const SAFE = /^(?!-)(?!.*--)[\w.:/@+=,%-]{1,200}$/;
   const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/ };
   const fits = (k, v) => (FORMS[k] ?? SAFE).test(v);
   const MAX_ENTRIES = 1000;
@@ -3208,14 +3208,19 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     const entries = c.entries.filter((e) => !same(state.entries.get(e.id), e));
     const newEntries = entries.filter((e) => !state.entries.has(e.id)).length;
     if (!entries.length && !notes.length && !pins && !values.length && !filters) { say('Nothing new in that file'); return; }
-    const ask = [`Import ${file.name}?`];
+    const ask = [`Import ${file.name.replace(IN_VALUE, '').slice(0, 60)}?`];
     if (entries.length) {
-      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. They copy as written:`);
-      for (const e of entries.slice(0, 10)) {
-        const lines = e.code.split('\n');
-        ask.push(...lines.slice(0, 3).map((l) => `  ${l.length > 120 ? `${l.slice(0, 120)}...` : l}`), ...(lines.length > 3 ? ['  ...'] : []));
+      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. Each copies as shown:`);
+      // Whole code, never a cut line (the cut part could be what runs), and a long run of blanks is counted, not shown.
+      // Past what a dialog holds, the rest is named, not hidden.
+      let room = 3000;
+      let listed = 0;
+      for (const e of entries) {
+        if ((room -= e.code.length) < 0) break;
+        ask.push('', ...e.code.split('\n').map((l) => `  ${l.replace(/[ \t]{8,}/g, (s) => ` [${s.length} blanks] `)}`));
+        listed++;
       }
-      if (entries.length > 10) ask.push(`  and ${n(entries.length - 10, 'more entry', 'more entries')}`);
+      if (listed < entries.length) ask.push('', `${n(entries.length - listed, 'more entry does', 'more entries do')} not fit here: read them under Your entries before you copy one.`);
     }
     if (notes.length) ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced.`);
     if (pins) ask.push('', `${n(pins, 'pin', 'pins')} added.`);

@@ -103,7 +103,7 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
   assert.match(await js('return window.copied[0];'), /db-1/);
   assert.doesNotMatch(await js('return window.copied[0];'), /\bHOST\b/);
   // A value that a shell or SQL would read as more than a value is marked, and the last good one holds.
-  for (const bad of ['db-1; reboot', '$(id)', '-oProxyCommand=x', "x' OR '1", 'a b']) {
+  for (const bad of ['db-1; reboot', '$(id)', '-oProxyCommand=x', "x' OR '1", 'a b', 'db-1--x']) {
     assert.equal(await js(`const i = document.querySelector('input[data-p=HOST]'); i.value = ${JSON.stringify(bad)}; i.dispatchEvent(new Event('input')); return i.hasAttribute('aria-invalid');`), true, bad);
   }
   assert.deepEqual(await js("return [...new Set([...document.querySelectorAll('var[data-p=HOST]')].map((v) => v.textContent))];"), ['db-1']);
@@ -235,6 +235,17 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
     assert.doesNotMatch(await js('return window.asked;'), /reboot|ProxyCommand/, 'a value a shell would run or read as an option is dropped');
     // The one question lists everything the file brings: entries with their code, notes and pins.
     assert.match(await js('return window.asked;'), /Entries: 2 added, 0 of yours replaced[^]*ssh HOST tail -f[^]*Notes: 1 added, 0 of yours replaced[^]*1 pin added/);
+    // Never a cut line: every line of a listed entry shows whole, a long run of blanks is counted, and what does not
+    // fit is named.
+    const long = { app: 'server-triage', format: 1, entries: [
+      { id: 'mine-00000000000000a1', kind: 'cmd', code: `echo 1\necho 2\necho 3\necho 4 zqlast\n${'x'.repeat(130)} zqtail\nls${' '.repeat(40)}zqhid`, text: '' },
+      { id: 'mine-00000000000000a2', kind: 'cmd', code: `echo ${'y'.repeat(2000)}`, text: '' },
+      { id: 'mine-00000000000000a3', kind: 'cmd', code: `echo ${'z'.repeat(2000)}`, text: '' }] };
+    await js('window.asked = null; return true;');
+    await put('long.json', JSON.stringify(long));
+    await until(page, 'window.asked !== null', 'the question on a long file');
+    const asked = await js('return window.asked;');
+    for (const part of ['zqlast', `${'x'.repeat(130)} zqtail`, 'ls [40 blanks] zqhid', '1 more entry does not fit here']) assert.ok(asked.includes(part), part);
     assert.equal(await js("return document.querySelectorAll('#mine-list .r').length;"), 0, 'a refused import changes nothing');
     await js('window.confirm = (m) => { window.asked = m; return true; }; return true;');
     await put('export.json', JSON.stringify(hostile));

@@ -198,7 +198,7 @@ export function parse(md) {
       if (!code.join('').trim()) fail(n, 'an empty code block');
       if (TOGGLES.some(([a, b]) => code.some((l) => a.test(l)) && code.some((l) => b.test(l)))) fail(n, 'both halves of a switch in one block: one paste would undo itself, so give each its own');
       // A keyword spelled like a blank (CLIENT KILL ID ID) would take your value too: write the keyword in lower case.
-      const twice = lang !== 'text' && code.map((l) => /\b([A-Z][A-Z0-9]*) \1\b/.exec(l)?.[1]).find((w) => Object.hasOwn(PLACEHOLDERS, w));
+      const twice = lang !== 'text' && code.flatMap((l) => [...l.matchAll(/\b([A-Z][A-Z0-9]*) \1\b/g)].map((m) => m[1])).find((w) => Object.hasOwn(PLACEHOLDERS, w));
       if (twice) fail(n, `"${twice} ${twice}": a keyword that the blank ${twice} would fill too; write the keyword in lower case`);
       for (i++; i < lines.length && !lines[i].trim(); i++);
       const text = paragraph();

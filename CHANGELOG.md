@@ -3,8 +3,8 @@
 ## 1.1.1 (2026-11-20)
 
 - Delete my data, and deleting one of your entries, now need a real second click: a double-click, a quick second click or a held Enter no longer deletes.
-- A value in Setup takes letters, digits and `. _ : / @ + = , % -` (a port or a process ID, digits only), and cannot start with `-`, so a command you copy never gets a quote, a `;`, a `$(...)` or an extra option from it. A value that does not fit is marked and the last good one holds; a file or a stored value that does not fit is dropped.
-- An import asks one question that lists everything the file changes: the entries it adds or replaces, with their code, the notes, the pins, the values and the filters. A file with nothing new says so.
+- A value in Setup takes letters, digits and `. _ : / @ + = , % -` (a port or a process ID, digits only), and cannot start with `-` or hold `--`, so a command you copy never gets a quote, a `;`, a `$(...)` or an extra option from it. A value that does not fit is marked and the last good one holds; a file or a stored value that does not fit is dropped.
+- An import asks one question that lists everything the file changes: the entries it adds or replaces, each with its whole code (what does not fit in the question is named, never cut short), the notes, the pins, the values and the filters. A file with nothing new says so.
 - A database that fails to load (or loads slowly) is no longer overwritten by the next change to your values or filters.
 - The characters refused as hidden now include every unusual space (no-break and the like), soft hyphens, variation selectors and the other invisible ones. The build, the page and the repository checks share one list.
 - A search no longer breaks on text holding a letter whose lower case is longer, such as the Turkish İ.

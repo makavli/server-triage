@@ -158,6 +158,7 @@ test('a block that undoes itself, or a keyword spelled like a blank, fails at it
   assert.throws(() => sheet('```js changes\nsh.stopBalancer()\nsh.startBalancer()\n```\n\nStops, then starts.\n'), /:7: both halves of a switch/);
   assert.throws(() => sheet('```sh danger\nredis-cli REPLICAOF NO ONE\nredis-cli -h HOST REPLICAOF IP PORT\n```\n\nPromotes.\n'), /:7: both halves of a switch/);
   assert.throws(() => sheet('```sh changes\nredis-cli CLIENT KILL ID ID\n```\n\nCloses.\n'), /:7: "ID ID": a keyword/);
+  assert.throws(() => sheet('```sh changes\necho NOT NOT then KILL ID ID\n```\n\nCloses.\n'), /:7: "ID ID": a keyword/, 'every pair on a line is checked');
   assert.doesNotThrow(() => sheet('```sh changes\nredis-cli CLIENT KILL id ID\n```\n\nCloses.\n\n```sh danger\nredis-cli -h HOST REPLICAOF NO ONE\n```\n\nPromotes.\n'));
 });
 
