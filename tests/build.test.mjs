@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { CACHED, HOPS, build, inline, parse, render, slug, worker } from '../tools/build.mjs';
+import { CACHED, HOPS, PLACEHOLDERS, SHORT, build, entryId, inline, parse, render, slug, worker } from '../tools/build.mjs';
 import { ICONS, png, svg } from '../tools/icons.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -25,7 +25,7 @@ test('the sheet reads into sections of entries', () => {
 test('a mistake in the sheet fails the build with its line', () => {
   const head = '# T\n\nIntro.\n\n## A\n\n'; // the next line is line 7
   const cases = [
-    ['```bash\nls\n```\n\nLists.\n', /:7: a code block must be sh, sql or text, not "bash"/],
+    ['```bash\nls\n```\n\nLists.\n', /:7: a code block must be sh, sql, js or text, not "bash"/],
     ['```sh\nls\n', /:7: a code block that is never closed/],
     ['```sh\n\n```\n\nNothing.\n', /:7: an empty code block/],
     ['```sh\nls\n```\n', /:7: an entry needs one paragraph/],
@@ -36,7 +36,7 @@ test('a mistake in the sheet fails the build with its line', () => {
     ['```sh\nls\n```\n\nLists.\n\n## B\n\n', /section "B" has no entries/],
     ['### G\n\n### H\n\n```sh\nls\n```\n\nLists.\n', /group "G" in "A" has no entries/],
     ['# U\n', /:7: a second # title/],
-    ['```constructor\nls\n```\n\nLists.\n', /:7: a code block must be sh, sql or text, not "constructor"/],
+    ['```constructor\nls\n```\n\nLists.\n', /:7: a code block must be sh, sql, js or text, not "constructor"/],
     ['## ?!\n', /:7: a section title needs a letter or a digit/],
     ['## Status\n', /:7: a section may not be called "status"/],
     // A bare marker once looped forever: each one fails at its line.
@@ -101,10 +101,59 @@ test('a hostile sheet is escaped in every part of the page', () => {
     '<p class="lede">L &lt;q5&gt;</p>',
     '<h3>G &lt;q6&gt; &quot;h&quot;</h3>',
     'data-in="S &lt;q4&gt; &quot;b&quot; G &lt;q6&gt; &quot;h&quot;"',
-    '<code class="k">echo &quot;&lt;q7&gt;&quot; &amp; x</code><p>P &lt;q8&gt;</p>',
-    '<code>&lt;/code&gt;&lt;q9&gt;</code>',
+    '<code class="k">echo &quot;&lt;q7&gt;&quot; &amp; x</code><div class="m"><p>P &lt;q8&gt;</p></div>',
+    '<code class="k">&lt;/code&gt;&lt;q9&gt;</code>',
     'Version 1&lt;2&quot;,',
   ]) assert.ok(page.includes(part), part);
+});
+
+// A small sheet: the body starts at line 7, and the sections the request path and the section bar need follow it.
+const needed = [...new Set([...HOPS.map((h) => h.section).filter(Boolean), ...Object.keys(SHORT)])]
+  .map((s) => `## ${s}\n\n\`\`\`sh\nls\n\`\`\`\n\nLists.\n`).join('\n');
+const sheet = (body) => parse(`# T\n\nIntro.\n\n## A\n\n${body}\n${needed}`);
+const first = (d) => d.sections[0].groups[0].items[0];
+
+test('tags name a risk, a distribution and versions, and a wrong one fails at its line', () => {
+  assert.deepEqual(first(sheet('```sql changes pg16+ mysql8.0.18+\nKILL 1;\n```\n\nKills.\n')).tags, ['changes', 'pg16+', 'mysql8.0.18+']);
+  assert.deepEqual(first(sheet('```sh danger rhel k8s1.30+\nrm x\n```\n\nRemoves.\n')).tags, ['danger', 'rhel', 'k8s1.30+']);
+  const cases = [
+    ['```sh risky\nls\n```\n\nLists.\n', /:7: an unknown tag "risky"/],
+    ['```sh pg+\nls\n```\n\nLists.\n', /:7: an unknown tag "pg\+"/],
+    ['```sh pg16\nls\n```\n\nLists.\n', /:7: an unknown tag "pg16"/],
+    ['```sh oracle19+\nls\n```\n\nLists.\n', /:7: an unknown tag "oracle19\+"/],
+    ['```sh constructor\nls\n```\n\nLists.\n', /:7: an unknown tag "constructor"/],
+    ['```text changes\nOops\n```\n\nAn error.\n', /:7: a changes tag on a text block/],
+    ['```sh changes danger\nls\n```\n\nLists.\n', /:7: two risk tags/],
+    ['```sh deb rhel\nls\n```\n\nLists.\n', /:7: two distro tags/],
+    ['```sh pg14+ pg16+\nls\n```\n\nLists.\n', /:7: two PostgreSQL version tags/],
+  ];
+  for (const [body, error] of cases) assert.throws(() => sheet(body), error, body);
+});
+
+test('every entry has an anchor from its section and its code, and the same code twice in a section fails', () => {
+  const d = sheet('```sh\nls -l\n```\n\nLists.\n\n```text\nOops\n```\n\nAn error.\n');
+  assert.deepEqual(d.sections[0].groups[0].items.map((it) => it.id), [entryId('a', 'ls -l'), entryId('a', 'Oops')]);
+  assert.match(entryId('a', 'ls -l'), /^a-[0-9a-f]{6}$/);
+  assert.equal(entryId('a', 'ls -l'), entryId('a', 'ls -l'), 'the same code keeps its anchor');
+  assert.throws(() => sheet('```sh\nls\n```\n\nLists.\n\n```sh\nls\n```\n\nAgain.\n'), /:13: the same code as line 7, in "A"/);
+  assert.throws(() => sheet('```sh\nls \u202e~ fr- mr\n```\n\nLists.\n'), /:8: a hidden character/);
+  assert.throws(() => sheet(`\`\`\`sh\nls\n\`\`\`\n\nLists.\n\n## ${entryId('a', 'ls')}\n\n\`\`\`sh\npwd\n\`\`\`\n\nWhere.\n`), /takes the id of the entry at line 7/);
+  const ids = doc.sections.flatMap((s) => s.groups).filter((g) => g.kind === 'rows').flatMap((g) => g.items).map((it) => it.id);
+  assert.equal(new Set(ids).size, ids.length, 'two entries share an anchor');
+  for (const id of ids) assert.ok(index.includes(` id="${id}" `), `${id} is not in the page`);
+});
+
+test('a row carries its tags as data and as badges, and its blanks as fields', () => {
+  const page = render(sheet('```sh changes deb pg16+\nssh HOST -p PORT HOSTNAME $FILE_X\n```\n\nConnects.\n\n### E\n\n```text\nHOST down\n```\n\nNot a blank.\n'),
+    { version: '1', style: '', script: '' });
+  assert.ok(page.includes(' data-tags="changes deb pg16+"'));
+  assert.ok(page.includes('<p class="tags"><span class="tag t-changes">Changes state</span><span class="tag t-deb">Debian, Ubuntu</span><span class="tag">PostgreSQL 16+</span></p>'));
+  assert.ok(page.includes('<code class="k">ssh <var data-p="HOST">HOST</var> -p <var data-p="PORT">PORT</var> HOSTNAME $FILE_X</code>'), 'a blank inside a longer word stays text');
+  assert.ok(page.includes('<code class="k">HOST down</code>'), 'an error keeps its capitals');
+  // Setup offers a field for each blank the sheet uses, and a version box for each engine its tags name.
+  assert.deepEqual([...page.matchAll(/<input data-p="([A-Z]+)"/g)].map((m) => m[1]), ['HOST', 'PORT']);
+  assert.deepEqual([...page.matchAll(/<input data-engine="([a-z0-9]+)"/g)].map((m) => m[1]), ['pg']);
+  for (const p of Object.keys(PLACEHOLDERS)) assert.match(p, /^[A-Z]{2,}$/);
 });
 
 test('sections are anchored as GitHub anchors their headings', () => {

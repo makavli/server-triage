@@ -1,6 +1,6 @@
 // The offline copy. The page comes from the network first, so an update shows on the next load, and from the cache
 // when the network fails; the manifest and the icons come from the cache. Built by tools/build.mjs: edit src/sw.js.
-const CACHE = 'triage-eb037e741bc4';
+const CACHE = 'triage-85b47f00b45b';
 const FILES = ["./","index.html","manifest.webmanifest","icons/icon.svg","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png"];
 const scope = new URL(self.registration.scope);
 const OWN = FILES.map((f) => new URL(f, scope).href);

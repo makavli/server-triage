@@ -66,7 +66,7 @@ test('relative links and images resolve', () => {
 // someone's real host.
 const exampleAddress = (ip) => {
   const [a, b, c] = ip.split('.').map(Number);
-  return a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
     || (a === 192 && b === 0 && c === 2) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113);
 };
 
@@ -80,6 +80,7 @@ test('no machine left a trace: no home folders, public addresses, e-mails or key
   for (const file of all.filter((f) => !f.endsWith('.png') && f !== 'tests/repo.test.mjs')) { // this file holds the pattern itself
     for (const line of text(file).split('\n')) {
       assert.ok(!traces.test(line), `${file}: ${line.trim().slice(0, 120)}`);
+      assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(line.replace(/\r$/, '')), `${file}: a hidden character (control, zero-width or bidi) in ${line.trim().slice(0, 60)}`);
       for (const [ip] of line.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g)) assert.ok(exampleAddress(ip), `${file}: a public address ${ip}`);
     }
   }
@@ -102,7 +103,8 @@ test('only the app and its sources ship: text, and PNGs of image data only', () 
       assert.deepEqual(types.filter((t) => !image.includes(t)), [], `${file} carries a chunk that is not image data`);
     } else {
       assert.match(file, /\.(md|mjs|js|css|html|json|webmanifest|ya?ml|svg)$|^(LICENSE|\.gitignore|\.gitattributes)$/, `unexpected file type: ${file}`);
-      assert.ok(size < 300_000, `${file} is ${size} bytes`);
+      // The sheet and the page built from it grow with the content; any other big text file is a stray blob.
+      assert.ok(size < (['CHEATSHEET.md', 'index.html'].includes(file) ? 900_000 : 300_000), `${file} is ${size} bytes`);
     }
   }
 });
