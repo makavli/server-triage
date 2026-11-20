@@ -1,0 +1,18 @@
+name: An entry is wrong
+description: A command fails, an explanation is wrong, or the page misbehaves.
+labels: [bug]
+body:
+  - type: input
+    id: entry
+    attributes:
+      label: The entry
+      description: The command or error as the sheet shows it, or the section and what the page did.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what is right
+      description: The system and versions it ran on (distribution, PostgreSQL 16, and so on). Remove host names, addresses and secrets from any output first.
+    validations:
+      required: true

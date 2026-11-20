@@ -1,0 +1,17 @@
+name: Add an entry
+description: A command or an error message that belongs on the sheet.
+labels: [enhancement]
+body:
+  - type: input
+    id: entry
+    attributes:
+      label: The command or error message
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What it tells you, and where it goes
+      description: One paragraph, as the sheet would print it, and the section it belongs in.
+    validations:
+      required: true

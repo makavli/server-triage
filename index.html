@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-MHTmwJ1X/rnu/5QZvR3+DjnuT3I5lc24wP5YEyxgnPg='; style-src 'sha256-CD/4BhvEuYqbroTYsrJha+vTB4btj3bIqGbjqboNjjo='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
+<title>Server Triage Sheet</title>
+<meta name="description" content="Commands and error meanings for a broken host, service or database.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>/* Layout: one capped column; the request path as the map up top; a sticky search bar; each section a two-column
+   ledger of command and meaning that stacks on phones. System faces only: the page loads nothing from elsewhere. */
+:root {
+  --bg: #f3f4f1;
+  --surface: #ffffff;
+  --ink: #1c2127;
+  --muted: #58626d;
+  --line: #dadfd8;
+  --line-strong: #b9bfb7;
+  --code-bg: #e9ece6;
+  --accent: #9a4a08;
+  --on-accent: #ffffff;
+  --err-bg: #f8e9e7;
+  --err-fg: #8a1f16;
+  --f-body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, sans-serif;
+  --f-head: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, sans-serif;
+  --f-mono: "Cascadia Mono", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  color-scheme: light;
+}
+/* Screen only: paper is white, so print keeps the light palette whatever the system's theme. */
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --surface: #171b20; --ink: #e3e6e9; --muted: #98a1ab;
+    --line: #262c33; --line-strong: #3a424b; --code-bg: #1d2228; --accent: #eda54f; --on-accent: #111418;
+    --err-bg: #2b1817; --err-fg: #ffb3a8; color-scheme: dark;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { overflow-x: clip; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.55 var(--f-body); -webkit-text-size-adjust: 100%; }
+.wrap { max-width: 74rem; margin-inline: auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+a { color: var(--accent); }
+a:focus-visible, code.k:focus-visible, #q:focus-visible, .install:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+.skip { position: absolute; left: 16px; top: -4rem; z-index: 30; background: var(--ink); color: var(--bg); padding: .5rem .8rem; border-radius: 6px; text-decoration: none; }
+.skip:focus-visible { top: .75rem; }
+
+/* Header */
+.top { padding-block: 2.5rem 1.25rem; }
+.head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem 1.5rem; }
+h1 { font: 600 clamp(2rem, 1.4rem + 2.4vw, 3rem)/1.05 var(--f-head); margin: 0; text-wrap: balance; overflow-wrap: break-word; min-width: 0; }
+.install { font: 600 .9375rem/1 var(--f-body); color: var(--on-accent); background: var(--accent); border: 0; border-radius: 6px; padding: .65rem 1rem; cursor: pointer; }
+.install:hover { filter: brightness(1.08); }
+.sub { max-width: 64ch; margin: .8rem 0 0; }
+.hint { color: var(--muted); max-width: 64ch; margin: .35rem 0 0; font-size: .9375rem; }
+.path { margin-top: 1.6rem; overflow-x: auto; padding-bottom: .3rem; }
+.path ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); min-width: 54rem; }
+.path li { position: relative; padding-right: .9rem; }
+.path li:not(:last-child)::after { content: ""; position: absolute; top: 50%; right: 0; width: .9rem; height: 1px; background: var(--line-strong); }
+.hop { display: block; height: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: .55rem .7rem; color: var(--ink); text-decoration: none; }
+a.hop:hover { border-color: var(--accent); }
+.hop.start { border-style: dashed; background: transparent; }
+.hop b { display: block; font: 600 .95rem/1.2 var(--f-body); }
+.hop span { display: block; margin-top: .2rem; font: 400 .78rem/1.3 var(--f-mono); color: var(--muted); }
+.path-note { color: var(--muted); font-size: .9375rem; margin: .6rem 0 0; max-width: 70ch; }
+
+/* Sticky bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+.bar-in { display: grid; grid-template-columns: minmax(0, 19rem) minmax(0, 1fr); gap: .6rem 1.25rem; align-items: center; padding-block: .6rem; }
+#q { width: 100%; font: 400 1rem var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: .5rem .7rem; }
+.toc { display: flex; gap: 1.1rem; overflow-x: auto; white-space: nowrap; min-width: 0; font-size: .9375rem; padding-block: .2rem; scrollbar-width: thin; }
+.toc a { color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--ink); }
+
+/* Sections */
+main { padding-block: .5rem 3rem; }
+section { padding-block: 2.25rem .25rem; scroll-margin-top: 4.5rem; }
+h2 { font: 600 1.65rem/1.15 var(--f-head); margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 66ch; margin: .35rem 0 .9rem; }
+h3 { font: 600 1rem/1.3 var(--f-body); margin: 1.4rem 0 .45rem; }
+.grp:first-of-type > h3 { margin-top: .4rem; }
+.t { border-top: 1px solid var(--line); }
+.r { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: .35rem 1.5rem; padding-block: .6rem; border-bottom: 1px solid var(--line); align-items: start; }
+.r > * { min-width: 0; margin: 0; }
+code { font-family: var(--f-mono); font-size: .875rem; }
+.r > code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; background: var(--code-bg); color: var(--ink); border-radius: 4px; padding: .35rem .55rem; }
+code.k { cursor: copy; }
+code.k:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.x > code { background: var(--err-bg); color: var(--err-fg); }
+.r p code, .rules code, .loop code, .sub code { background: var(--code-bg); border-radius: 3px; padding: .05rem .3rem; font-size: .85em; overflow-wrap: anywhere; }
+.r b, .rules b { font-weight: 600; }
+
+.loop { list-style: none; margin: 0; padding: 0; counter-reset: s; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem 1.5rem; }
+.loop li { counter-increment: s; border-top: 2px solid var(--ink); padding-top: .6rem; min-width: 0; }
+.loop li::before { content: counter(s); display: block; font: 600 1.35rem/1 var(--f-head); color: var(--accent); margin-bottom: .35rem; }
+.loop b { display: block; font-weight: 600; }
+.loop p { margin: .2rem 0 0; color: var(--muted); }
+
+.rules { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 1rem 1.25rem; margin-top: 1.4rem; }
+.rules > h3 { margin-top: 0; }
+.rules ul { margin: 0; padding-left: 1.1rem; display: grid; gap: .55rem; }
+
+.none { color: var(--muted); padding-block: 2rem; }
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .9375rem; }
+footer .wrap { padding-block: 1.25rem 2rem; display: grid; gap: .4rem; }
+footer p { margin: 0; max-width: 70ch; }
+
+.toast { position: fixed; left: 50%; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, .5rem); opacity: 0; transition: opacity .15s ease, transform .15s ease; background: var(--ink); color: var(--bg); padding: .45rem .9rem; border-radius: 6px; font-size: .9375rem; pointer-events: none; z-index: 20; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+@media (max-width: 900px) { .loop { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .r { grid-template-columns: minmax(0, 1fr); }
+  .bar-in { grid-template-columns: minmax(0, 1fr); }
+  section { scroll-margin-top: 7.5rem; }
+}
+@media (max-width: 520px) { .loop { grid-template-columns: minmax(0, 1fr); } }
+@media print {
+  .bar, .path, .path-note, .hint, .install, .toast, .skip { display: none !important; }
+  .r, .loop li { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the sheet</a>
+<header class="top wrap">
+  <div class="head">
+    <h1>Server Triage Sheet</h1>
+    <button id="install" class="install" type="button" hidden>Install app</button>
+  </div>
+  <p class="sub">Commands and error meanings for a broken host, service or database. Each entry is a command or an error message, then what it tells you and where to look next. Placeholders in capitals (HOST, PID, POD, SVC, APP) are yours to fill.</p>
+  <p class="hint">Click a command to copy it. Press / to search; every word must match.</p>
+  <nav class="path" aria-label="The request path">
+    <ol>
+      <li><span class="hop start"><b>Client</b><span>curl -v</span></span></li>
+      <li><a class="hop" href="#dns-ports-and-packets"><b>DNS</b><span>getent, dig</span></a></li>
+      <li><a class="hop" href="#dns-ports-and-packets"><b>Network</b><span>ss, nc, mtr</span></a></li>
+      <li><a class="hop" href="#tls-and-certificates"><b>TLS</b><span>s_client</span></a></li>
+      <li><a class="hop" href="#http-proxies-load-balancers"><b>Load balancer</b><span>curl -w</span></a></li>
+      <li><a class="hop" href="#http-proxies-load-balancers"><b>Proxy</b><span>nginx -T</span></a></li>
+      <li><a class="hop" href="#services-and-logs"><b>App</b><span>journalctl</span></a></li>
+      <li><a class="hop" href="#postgresql"><b>Database</b><span>psql, redis-cli</span></a></li>
+    </ol>
+  </nav>
+  <p class="path-note">A request crosses these hops from left to right. Test them in that order and dig where the first one fails.</p>
+</header>
+
+<div class="bar">
+  <div class="wrap bar-in">
+    <label for="q" class="sr">Search commands and errors</label>
+    <input id="q" type="search" placeholder="Search: 502, refused, postgresql lock" autocomplete="off" spellcheck="false">
+    <nav class="toc" aria-label="Sections">
+      <a href="#the-loop">Loop</a>
+      <a href="#first-minute-on-a-host">First minute</a>
+      <a href="#error-decoder">Errors</a>
+      <a href="#services-and-logs">Services</a>
+      <a href="#cpu-memory-disk-files">Resources</a>
+      <a href="#dns-ports-and-packets">Network</a>
+      <a href="#tls-and-certificates">TLS</a>
+      <a href="#http-proxies-load-balancers">HTTP</a>
+      <a href="#containers-and-kubernetes">Kubernetes</a>
+      <a href="#postgresql">PostgreSQL</a>
+      <a href="#mysql-and-mariadb">MySQL</a>
+      <a href="#redis">Redis</a>
+    </nav>
+  </div>
+</div>
+
+<main id="main" class="wrap">
+<section id="the-loop">
+<h2>The loop</h2>
+<p class="lede">Six steps that work for any outage, from a 502 to a full disk.</p>
+<div class="grp"><ol class="loop"><li data-in="The loop"><b>Pin the symptom.</b><p>The exact error text, when it started, who is hit: everyone, one node, one region, a percentage. &quot;Slow&quot; needs a number.</p></li><li data-in="The loop"><b>Ask what changed.</b><p>A deploy, a config push, an expiring cert, a rotated secret, a traffic shift, a dependency, a filling disk, the clock.</p></li><li data-in="The loop"><b>Walk the path.</b><p>Test each hop from the client inward: DNS, network, TLS, load balancer, proxy, app, database. Stop at the first that fails.</p></li><li data-in="The loop"><b>Read the first error.</b><p>Logs fill up with the cascade. Go to the earliest timestamp and the first distinct message.</p></li><li data-in="The loop"><b>Diff against healthy.</b><p>Another node, the previous release, staging. Compare config, versions, environment, resolved IPs.</p></li><li data-in="The loop"><b>Capture, then mitigate.</b><p>Save logs, <code>ss</code> output and thread dumps before a restart. Roll back before fixing forward. Root cause comes after recovery.</p></li></ol></div>
+</section>
+
+<section id="first-minute-on-a-host">
+<h2>First minute on a host</h2>
+<p class="lede">Brendan Gregg's 60-second checklist. Run it top to bottom before forming a theory. <code>mpstat</code>, <code>pidstat</code>, <code>iostat</code> and <code>sar</code> come from the sysstat package.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="First minute on a host"><code class="k">uptime</code><p>Load averages over 1, 5 and 15 minutes; compare with <code>nproc</code>. Linux also counts tasks blocked on disk or NFS, so high load with an idle CPU points to IO.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">dmesg -T | tail -50</code><p>The kernel's view: OOM kills, disk and filesystem errors, NIC resets, &quot;nf_conntrack: table full&quot;, segfaults.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">vmstat 1 5</code><p><b>r</b> above the core count: CPU saturated. <b>b</b>: tasks stuck on IO. <b>si/so</b> above 0: swapping. <b>wa</b>: IO wait. <b>st</b>: CPU stolen by the hypervisor.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">mpstat -P ALL 1 3</code><p>One core pinned while the rest idle: a single-threaded hot loop, or interrupts landing on one CPU.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">pidstat 1 5</code><p>CPU per process over several seconds. Catches spiky processes a single <code>top</code> snapshot misses.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">iostat -xz 1 3</code><p><b>r_await</b> and <b>w_await</b> are latency in ms, <b>aqu-sz</b> the queue. <code>%util</code> near 100 means saturated only on single-queue disks; SSD and NVMe serve requests in parallel.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">free -m</code><p>Read <b>available</b>, not free. buff/cache is memory the kernel gives back on demand.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">sar -n DEV 1 3</code><p>Throughput per interface. Compare rxkB/s and txkB/s with the link speed.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">sar -n TCP,ETCP 1 3</code><p><b>active/s</b>: outbound connects. <b>passive/s</b>: inbound. <b>retrans/s</b> above a handful: packet loss or an overloaded peer.</p></div>
+<div class="r" data-in="First minute on a host"><code class="k">top</code><p>Confirm the process the steps above pointed at. Press 1 for each core, M to sort by memory, P by CPU.</p></div>
+</div></div>
+</section>
+
+<section id="error-decoder">
+<h2>Error decoder</h2>
+<p class="lede">The message the kernel or libc hands you, what it really means, and where to look next.</p>
+<div class="grp"><div class="t">
+<div class="r x" data-in="Error decoder"><code>Connection refused</code><p>The host answered with a reset: it is up, but nothing listens on that IP and port. <b>Check</b> the service runs, the port is right, and it is not bound to 127.0.0.1 (<code>ss -tlnp</code>).</p></div>
+<div class="r x" data-in="Error decoder"><code>Connection timed out</code><p>No answer at all. A firewall or security group drops the packets, the route is wrong, or the host is down. <b>Check</b> with <code>tcpdump</code> for a SYN with no reply.</p></div>
+<div class="r x" data-in="Error decoder"><code>No route to host</code><p>An ICMP unreachable came back: the host is down on the local network (ARP fails) or a firewall rule REJECTs. <b>Check</b> <code>ip route get IP</code> and the rules.</p></div>
+<div class="r x" data-in="Error decoder"><code>Temporary failure in name resolution
+Name or service not known</code><p>DNS: a typo, a wrong search domain, or an unreachable resolver. <b>Check</b> <code>getent hosts NAME</code> against <code>dig NAME</code>.</p></div>
+<div class="r x" data-in="Error decoder"><code>Connection reset by peer</code><p>The other side aborted: its process crashed or was killed, a load balancer idle timeout fired, or a proxy rejected the request. <b>Check</b> the peer's logs at that second.</p></div>
+<div class="r x" data-in="Error decoder"><code>Broken pipe</code><p>You wrote to a socket the peer had already closed. Same causes as a reset, seen from the writer.</p></div>
+<div class="r x" data-in="Error decoder"><code>Cannot assign requested address</code><p>On connect: ephemeral ports to one destination are used up, usually by TIME_WAIT. On bind: that IP is not on this host. <b>Fix</b> by reusing connections (keep-alive, pools).</p></div>
+<div class="r x" data-in="Error decoder"><code>Address already in use</code><p>Another process holds the port: <code>ss -tlnp 'sport = :8080'</code>. A server that restarts fast also needs SO_REUSEADDR.</p></div>
+<div class="r x" data-in="Error decoder"><code>Too many open files</code><p>The process hit its file descriptor limit: a leak or a low limit. <b>Check</b> <code>ls /proc/PID/fd | wc -l</code> against <code>/proc/PID/limits</code>; raise <code>LimitNOFILE=</code> in the unit.</p></div>
+<div class="r x" data-in="Error decoder"><code>No space left on device</code><p>Out of blocks or out of inodes (<code>df -h</code>, <code>df -i</code>). From a file watcher it means <code>fs.inotify.max_user_watches</code> is used up, not the disk.</p></div>
+<div class="r x" data-in="Error decoder"><code>Permission denied</code><p>File mode or owner, a parent directory without x, SELinux or AppArmor, or a port under 1024 without CAP_NET_BIND_SERVICE. <b>Check</b> <code>namei -l /path</code> and <code>ausearch -m avc -ts recent</code>.</p></div>
+<div class="r x" data-in="Error decoder"><code>Operation not permitted</code><p>A missing capability (common in containers), a seccomp filter, or an immutable file (<code>lsattr</code>). Being root does not bypass these.</p></div>
+<div class="r x" data-in="Error decoder"><code>Read-only file system</code><p>The kernel remounted the filesystem after IO errors (see <code>dmesg</code>), or a container runs with a read-only root.</p></div>
+<div class="r x" data-in="Error decoder"><code>fork: Resource temporarily unavailable</code><p>Process or thread limit: <code>ulimit -u</code>, the cgroup's <code>pids.max</code>, <code>kernel.pid_max</code>. Often a thread leak.</p></div>
+<div class="r x" data-in="Error decoder"><code>Killed</code><p>SIGKILL, exit 137: often the OOM killer or a cgroup memory limit; <b>check</b> <code>dmesg -T | grep -i 'killed process'</code>. If the kernel log is clean, someone sent <code>kill -9</code>, or systemd killed it when it outlived <code>TimeoutStopSec=</code> (<code>journalctl -u UNIT</code>).</p></div>
+<div class="r x" data-in="Error decoder"><code>/usr/bin/env: 'bash\r': No such file or directory</code><p>The script has Windows line endings. <b>Fix</b> with <code>sed -i 's/\r$//' script.sh</code> and prevent it with <code>git config core.autocrlf input</code>.</p></div>
+<div class="r x" data-in="Error decoder"><code>small requests work, big ones hang</code><p>An MTU black hole: a tunnel, VPN or overlay lowers the MTU and the ICMP &quot;fragmentation needed&quot; reply is blocked. <b>Check</b> with the <code>ping -M do</code> test under DNS, ports and packets.</p></div>
+</div></div>
+</section>
+
+<section id="services-and-logs">
+<h2>Services and logs</h2>
+<p class="lede">systemd and journald on most distributions. Read the unit before you trust what you think it runs.</p>
+<div class="grp"><h3>systemd</h3><div class="t">
+<div class="r" data-in="Services and logs systemd"><code class="k">systemctl status APP</code><p>State, main PID, memory, the last log lines and the exit status in one view.</p></div>
+<div class="r" data-in="Services and logs systemd"><code class="k">systemctl --failed</code><p>Every unit that failed since boot.</p></div>
+<div class="r" data-in="Services and logs systemd"><code class="k">systemctl cat APP</code><p>The unit file plus every drop-in: what actually runs, as which user, with which environment and limits.</p></div>
+<div class="r" data-in="Services and logs systemd"><code class="k">systemctl show APP -p NRestarts,Result,ExecMainStatus</code><p>How many times it restarted and how the last run ended.</p></div>
+<div class="r" data-in="Services and logs systemd"><code class="k">systemctl reset-failed APP</code><p>Clears &quot;start request repeated too quickly&quot; (StartLimitBurst hit) once you have fixed the cause.</p></div>
+</div></div>
+<div class="grp"><h3>Logs</h3><div class="t">
+<div class="r" data-in="Services and logs Logs"><code class="k">journalctl -u APP -b -p warning --no-pager</code><p>This boot, warnings and worse, for one unit.</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">journalctl -u APP --since &quot;15 min ago&quot; -f</code><p>Recent history, then follow.</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">journalctl --since &quot;09:00&quot; --until &quot;09:15&quot;</code><p>Every unit in the incident window. The neighbour that failed first is often the cause.</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">journalctl -k -b -1</code><p>Kernel log of the previous boot: why it rebooted. Needs a persistent journal (<code>/var/log/journal</code> exists).</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">tail -F /var/log/app/app.log</code><p><code>-F</code> keeps following across log rotation; <code>-f</code> stays on the rotated-away file.</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">grep ERROR app.log | cut -c1-16 | uniq -c</code><p>Errors per minute for ISO timestamps. The spike shows when it started.</p></div>
+<div class="r" data-in="Services and logs Logs"><code class="k">zgrep -h 'req_id=abc123' /var/log/app/app.log*</code><p>Searches rotated and compressed logs too.</p></div>
+</div></div>
+<div class="grp"><h3>Exit codes</h3><div class="t">
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 1</code><p>A generic failure from the app itself. Its own log has the reason.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 126</code><p>Found but not executable: permissions, or a noexec mount.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 127</code><p>Command not found: PATH, a missing binary, the wrong image.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 137</code><p>128 + 9, SIGKILL: the OOM killer, a cgroup memory limit, or someone's <code>kill -9</code>.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 139</code><p>128 + 11, SIGSEGV: a crash in native code. <code>coredumpctl list</code>, then <code>coredumpctl gdb PID</code>.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>exit 143</code><p>128 + 15, SIGTERM: a normal stop. A problem only when nobody asked it to stop.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>status=203/EXEC</code><p>systemd could not exec <code>ExecStart</code>: wrong path, not executable, a bad shebang, or CRLF line endings.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>status=200/CHDIR</code><p><code>WorkingDirectory=</code> does not exist.</p></div>
+<div class="r x" data-in="Services and logs Exit codes"><code>status=217/USER</code><p><code>User=</code> does not exist on this host.</p></div>
+</div></div>
+</section>
+
+<section id="cpu-memory-disk-files">
+<h2>CPU, memory, disk, files</h2>
+<p class="lede">Where the machine's limits are, and which process is pressing on them.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">ps aux --sort=-%mem | head</code><p>Top memory users by RSS. Use <code>--sort=-%cpu</code> for CPU.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">systemd-cgtop</code><p>CPU, memory and IO per cgroup, so per service or per container.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">dmesg -T | grep -iE 'killed process|out of memory'</code><p>Which process the OOM killer chose, and its RSS at that moment.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">df -hT</code><p>Space per filesystem, with its type.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">df -i</code><p>Inodes. 100% used with free space left means millions of small files: sessions, a cache, a mail queue.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">sudo ionice -c3 du -xhd1 / 2&gt;/dev/null | sort -h | tail</code><p>Biggest directories; <code>-x</code> stays on one filesystem. As root so no directory is skipped, at idle I/O priority so it does not starve the disk. Repeat one level down.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">lsof +L1</code><p>Deleted files still held open. When <code>df</code> says full and <code>du</code> cannot find it, it is usually these; otherwise files hidden under a mount point (<code>mount --bind / /mnt</code> and run <code>du</code> on <code>/mnt</code>). Restart the holder. For a log only, truncate it with <code>: &gt; /proc/PID/fd/N</code>, after copying it to another filesystem if you need it. Never truncate a live database file or WAL: the process still uses it. A writer that does not append keeps its offset, so the file comes back sparse.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">ls /proc/PID/fd | wc -l</code><p>Open descriptors. Compare with <code>grep 'open files' /proc/PID/limits</code>; a count that keeps climbing is a leak.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">sudo timeout 10 strace -f -tt -p PID -e trace=network,file</code><p>What a stuck or slow process is doing, syscall by syscall. It slows the target a lot: seconds, not minutes, in production. Stop it with Ctrl-C or <code>timeout</code>, never <code>kill -9</code>: a strace killed hard can leave the target stopped (<code>kill -CONT PID</code>).</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">sudo timeout 10 strace -c -f -p PID</code><p>A syscall summary after 10 seconds: time spent in futex, read, poll, connect.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">sudo cat /proc/PID/stack</code><p>Where a process in state D waits inside the kernel.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">sudo perf top -p PID</code><p>Hot functions live, kernel and user space. Needs root, or a low <code>kernel.perf_event_paranoid</code>.</p></div>
+<div class="r" data-in="CPU, memory, disk, files"><code class="k">timedatectl</code><p>Clock and NTP sync. Skew breaks TLS validity, JWT expiry, Kerberos and distributed locks.</p></div>
+</div></div>
+</section>
+
+<section id="dns-ports-and-packets">
+<h2>DNS, ports and packets</h2>
+<p class="lede">Resolve, then reach, then read the sockets, then look at the packets. Each layer answers before the next is worth asking.</p>
+<div class="grp"><h3>Resolve</h3><div class="t">
+<div class="r" data-in="DNS, ports and packets Resolve"><code class="k">getent hosts NAME</code><p>Resolves the way the app does, through nsswitch: <code>/etc/hosts</code> first, then DNS.</p></div>
+<div class="r" data-in="DNS, ports and packets Resolve"><code class="k">dig +short NAME</code><p>DNS only. A different answer from <code>getent</code> means <code>/etc/hosts</code> or a search domain is involved.</p></div>
+<div class="r" data-in="DNS, ports and packets Resolve"><code class="k">dig @RESOLVER NAME +noall +answer</code><p>Asks one specific resolver and shows the TTL left on the record. A stale cache shows here.</p></div>
+<div class="r" data-in="DNS, ports and packets Resolve"><code class="k">resolvectl status</code><p>The upstream servers systemd-resolved really uses. 127.0.0.53 in <code>resolv.conf</code> is only its local stub.</p></div>
+</div></div>
+<div class="grp"><h3>Reach</h3><div class="t">
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">ip -br addr</code><p>Interfaces, state and addresses, one line each.</p></div>
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">ip route get IP</code><p>The interface, gateway and source address the kernel would use for that destination.</p></div>
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">nc -zv -w3 HOST 5432</code><p>Is the TCP port open from here.</p></div>
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">timeout 3 bash -c '&lt;/dev/tcp/HOST/5432' &amp;&amp; echo open</code><p>The same check on a minimal host without <code>nc</code>.</p></div>
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">mtr -rwc 50 HOST</code><p>Loss and latency per hop. Loss at a middle hop that does not carry on to the end is ICMP rate limiting; ignore it.</p></div>
+<div class="r" data-in="DNS, ports and packets Reach"><code class="k">ping -M do -s 1472 HOST</code><p>Path MTU test: 1472 bytes plus 28 of headers fills 1500. Lower the size until replies come back.</p></div>
+</div></div>
+<div class="grp"><h3>Sockets</h3><div class="t">
+<div class="r" data-in="DNS, ports and packets Sockets"><code class="k">ss -tlnp</code><p>What listens, on which address, owned by which process. 127.0.0.1 is local only; 0.0.0.0 or [::] is every interface.</p></div>
+<div class="r" data-in="DNS, ports and packets Sockets"><code class="k">ss -tnp 'dport = :5432'</code><p>Open connections to a port (here the database) with the owning process.</p></div>
+<div class="r" data-in="DNS, ports and packets Sockets"><code class="k">ss -s</code><p>Totals per state. The fast way to spot thousands of TIME_WAIT or CLOSE_WAIT.</p></div>
+<div class="r" data-in="DNS, ports and packets Sockets"><code class="k">ss -ltn</code><p>On a LISTEN socket, Recv-Q is the accept queue now and Send-Q its limit. Recv-Q near Send-Q: the app is not accepting fast enough.</p></div>
+<div class="r" data-in="DNS, ports and packets Sockets"><code class="k">nstat -az | grep -iE 'listen|retrans'</code><p>Kernel counters. ListenOverflows and ListenDrops are connections lost to a full accept queue.</p></div>
+</div></div>
+<div class="grp"><h3>Packets and firewall</h3><div class="t">
+<div class="r" data-in="DNS, ports and packets Packets and firewall"><code class="k">tcpdump -i any -nn 'host IP and port 443'</code><p>A SYN with no reply: dropped on the way. A SYN answered by a RST: port closed. Add <code>-w cap.pcap</code> for Wireshark.</p></div>
+<div class="r" data-in="DNS, ports and packets Packets and firewall"><code class="k">nft list ruleset</code><p>Every firewall rule on a modern distribution. The <code>iptables</code> command is often a front end to it.</p></div>
+<div class="r" data-in="DNS, ports and packets Packets and firewall"><code class="k">iptables -L -n -v --line-numbers</code><p>Rules with packet counters. Run it twice and watch which counter climbs. It shows the filter table only: add <code>-t nat</code> for the port forwarding and masquerading of Docker and kube-proxy.</p></div>
+<div class="r" data-in="DNS, ports and packets Packets and firewall"><code class="k">sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max</code><p>The connection tracking table. When it is full the kernel drops new connections and logs &quot;table full&quot; in <code>dmesg</code>.</p></div>
+</div></div>
+<div class="grp"><h3>Socket states</h3><div class="t">
+<div class="r x" data-in="DNS, ports and packets Socket states"><code>CLOSE_WAIT piling up</code><p>The peer closed and your app never called <code>close()</code>. A socket leak in your code; the network is fine.</p></div>
+<div class="r x" data-in="DNS, ports and packets Socket states"><code>TIME_WAIT in thousands</code><p>Normal on the side that closes first. A problem only when it exhausts ports to one destination. Reuse connections instead of tuning it away.</p></div>
+<div class="r x" data-in="DNS, ports and packets Socket states"><code>SYN_SENT stuck</code><p>Your SYN gets no answer: a firewall drop, a security group, a wrong route.</p></div>
+<div class="r x" data-in="DNS, ports and packets Socket states"><code>SYN_RECV piling up</code><p>Handshakes not completing: a SYN flood, or replies leaving by another path (asymmetric routing).</p></div>
+</div></div>
+</section>
+
+<section id="tls-and-certificates">
+<h2>TLS and certificates</h2>
+<p class="lede">Most TLS outages are an expiry, a missing intermediate, a name that is not in the certificate, or a wrong clock.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="TLS and certificates"><code class="k">openssl s_client -connect HOST:443 -servername HOST -verify_hostname HOST &lt;/dev/null</code><p>The handshake, the chain the server sends, and &quot;Verify return code: 0 (ok)&quot;. Without <code>-verify_hostname</code>, 0 (ok) means only that the chain is trusted, not that the certificate is for HOST. <code>-servername</code> (SNI) matters when you connect to an IP: without it you may get the default certificate.</p></div>
+<div class="r" data-in="TLS and certificates"><code class="k">openssl s_client -connect HOST:443 -servername HOST &lt;/dev/null 2&gt;/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName</code><p>Who the certificate is for, who signed it, when it expires, and the names it covers.</p></div>
+<div class="r" data-in="TLS and certificates"><code class="k">openssl s_client -connect HOST:443 -servername HOST -showcerts &lt;/dev/null</code><p>Every certificate sent. A missing intermediate works in browsers (they fetch it) and fails in curl, Java, Go and Python.</p></div>
+<div class="r" data-in="TLS and certificates"><code class="k">openssl x509 -in cert.pem -noout -checkend 604800</code><p>Exits 1 if the certificate expires within 7 days. Ready for a cron job or a probe.</p></div>
+<div class="r" data-in="TLS and certificates"><code class="k">openssl x509 -in cert.pem -noout -pubkey | sha256sum
+openssl pkey -in key.pem -pubout | sha256sum</code><p>The two hashes must match, or the key does not belong to the certificate.</p></div>
+<div class="r" data-in="TLS and certificates"><code class="k">curl -v --resolve HOST:443:10.0.0.5 https://HOST/health</code><p>Hits one backend with the real hostname and SNI, bypassing DNS and the load balancer.</p></div>
+</div></div>
+<div class="grp"><h3>TLS errors</h3><div class="t">
+<div class="r x" data-in="TLS and certificates TLS errors"><code>certificate has expired</code><p>Expired, or this machine's clock is wrong (<code>timedatectl</code>). &quot;Not yet valid&quot; is almost always the clock.</p></div>
+<div class="r x" data-in="TLS and certificates TLS errors"><code>unable to get local issuer certificate</code><p>The chain does not reach a trusted root: the server omits the intermediate, or the client lacks your private CA. Add the CA as a <code>.crt</code> file to <code>/usr/local/share/ca-certificates</code> and run <code>update-ca-certificates</code> (Debian, Ubuntu), or to <code>/etc/pki/ca-trust/source/anchors</code> and run <code>update-ca-trust</code> (RHEL, Fedora).</p></div>
+<div class="r x" data-in="TLS and certificates TLS errors"><code>no alternative certificate subject name matches</code><p>The hostname is not in the SAN list (modern clients ignore CN), or SNI picked the wrong certificate.</p></div>
+<div class="r x" data-in="TLS and certificates TLS errors"><code>wrong version number</code><p>You spoke TLS to a plain HTTP port, or HTTP to a TLS port.</p></div>
+<div class="r x" data-in="TLS and certificates TLS errors"><code>handshake failure</code><p>No TLS version or cipher in common, or the server demands a client certificate (mTLS).</p></div>
+</div></div>
+</section>
+
+<section id="http-proxies-load-balancers">
+<h2>HTTP, proxies, load balancers</h2>
+<p class="lede">The status code tells you which layer gave up. The proxy's error log tells you why.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">curl -so /dev/null -w 'dns %{time_namelookup} tcp %{time_connect} tls %{time_appconnect} ttfb %{time_starttransfer} total %{time_total} code %{http_code}\n' https://HOST/</code><p>Where the time goes. Every value is cumulative seconds, so ttfb minus tls is the server's thinking time.</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">curl -sv -H 'Host: app.example.com' http://10.0.0.5:8080/health</code><p>One backend directly, with the virtual host it expects.</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">nginx -t &amp;&amp; nginx -s reload</code><p>Validate, then reload without dropping connections. A failed test leaves the running config alone.</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">nginx -T</code><p>The whole config with every include expanded, as nginx parses it now. It prints any secret written in the config (an <code>Authorization</code> header, a password in an upstream URL): mind where you paste it.</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">tail -f /var/log/nginx/error.log</code><p>Upstream failures are logged here, not in <code>access.log</code>.</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">awk '{print $9}' access.log | sort | uniq -c | sort -rn</code><p>Count per status code (field 9 in the default combined format).</p></div>
+<div class="r" data-in="HTTP, proxies, load balancers"><code class="k">awk '{print $1}' access.log | sort | uniq -c | sort -rn | head</code><p>Top client IPs: a scraper, a retry storm, a broken health check.</p></div>
+</div></div>
+<div class="grp"><h3>Status codes</h3><div class="t">
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>500</code><p>The app threw. Its logs have the stack trace.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>502 Bad Gateway</code><p>The proxy got no valid response: upstream down, refused, crashed mid-response, wrong port, or plain HTTP sent to an HTTPS upstream. Random 502s: see the keep-alive rule below.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>503 Service Unavailable</code><p>No healthy upstream: every backend fails its health check, a Kubernetes Service has no ready endpoints, or the app is shedding load.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>504 Gateway Timeout</code><p>The upstream accepted but answered too late (nginx <code>proxy_read_timeout</code>, 60 s by default). Often a slow query or a lock wait behind it.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>499</code><p>nginx only: the client hung up first. Its timeout is shorter than your response time.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>413 Request Entity Too Large</code><p>Body over nginx <code>client_max_body_size</code>, which defaults to 1m.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>400 Request Header Or Cookie Too Large</code><p>Cookies piled up. Raise <code>large_client_header_buffers</code> or clear them.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>401 Unauthorized</code><p>Credentials missing or invalid.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>403 Forbidden</code><p>Known but not allowed. From nginx itself, often file permissions or a deny rule.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers Status codes"><code>429 Too Many Requests</code><p>Rate limited, by you or by an upstream. Honour Retry-After.</p></div>
+</div></div>
+<div class="grp"><h3>nginx error log</h3><div class="t">
+<div class="r x" data-in="HTTP, proxies, load balancers nginx error log"><code>connect() failed (111: Connection refused) while connecting to upstream</code><p>Nothing listens at the upstream address.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers nginx error log"><code>upstream timed out (110: Connection timed out)</code><p>A slow upstream, or packets to it dropped.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers nginx error log"><code>upstream prematurely closed connection</code><p>The app died mid-request, or closed a keep-alive connection nginx was reusing.</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers nginx error log"><code>no live upstreams</code><p>Every server in the upstream block is marked failed (<code>max_fails</code> within <code>fail_timeout</code>).</p></div>
+<div class="r x" data-in="HTTP, proxies, load balancers nginx error log"><code>(13: Permission denied) while connecting to upstream</code><p>SELinux stops nginx from opening connections. Confirm with <code>ausearch -m avc -ts recent</code>. <code>setsebool -P httpd_can_network_connect 1</code> fixes it by letting every web server process connect to any port, and <code>-P</code> keeps that across reboots: a wide change to the policy, so make it on purpose.</p></div>
+</div></div>
+<div class="grp rules"><h3>Three rules that prevent the strange ones</h3><ul><li data-in="HTTP, proxies, load balancers Three rules that prevent the strange ones"><b>Keep-alive.</b> The backend's idle timeout must be longer than the proxy's or the load balancer's. Otherwise the proxy reuses a socket the backend just closed and you get random 502s. Node's <code>keepAliveTimeout</code> defaults to 5 s; an AWS ALB keeps idle connections for 60 s.</li><li data-in="HTTP, proxies, load balancers Three rules that prevent the strange ones"><b>Timeouts shrink inward.</b> Client, then load balancer, proxy, app and the database's <code>statement_timeout</code>, each shorter than the one outside it. The innermost layer then fails first and reports the real cause.</li><li data-in="HTTP, proxies, load balancers Three rules that prevent the strange ones"><b>Retry at one layer.</b> Only idempotent requests, with backoff and jitter. Three layers making three attempts each turn one failure into 27 requests.</li></ul></div>
+</section>
+
+<section id="containers-and-kubernetes">
+<h2>Containers and Kubernetes</h2>
+<p class="lede">The container's exit code and the pod's Events answer most questions before any log does.</p>
+<div class="grp"><h3>Docker</h3><div class="t">
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'</code><p>Status shows exit codes (&quot;Exited (137) 2 minutes ago&quot;); Ports shows what is published to the host.</p></div>
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker logs -t --since 10m APP</code><p>The container's stdout and stderr with timestamps.</p></div>
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker inspect -f '{{.State.ExitCode}} oom={{.State.OOMKilled}} {{.State.Error}}' APP</code><p>Why it stopped. <code>oom=true</code> is the memory limit.</p></div>
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker stats --no-stream</code><p>CPU, memory against its limit, network and block IO per container.</p></div>
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker run --rm -it --network container:APP nicolaka/netshoot</code><p>Debug tools inside the container's network namespace. Works for distroless images with no shell.</p></div>
+<div class="r" data-in="Containers and Kubernetes Docker"><code class="k">docker system df</code><p>Space taken by images, containers, volumes and the build cache.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Docker"><code>works inside the container, refused from outside</code><p>The app binds 127.0.0.1 inside the container. Bind 0.0.0.0, and check the port is published.</p></div>
+</div></div>
+<div class="grp"><h3>kubectl</h3><div class="t">
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get pods -A -o wide</code><p>READY, STATUS, RESTARTS and the node, cluster-wide. Restarts above 0 deserve a look.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl describe pod POD</code><p>The Events at the bottom say why: scheduling, image pulls, failed probes, OOM.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl logs POD -c CTR --previous</code><p>Logs of the instance that crashed, not the fresh one.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get events -A --sort-by=.lastTimestamp | tail -30</code><p>The cluster's recent story across every namespace.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get endpointslices -l kubernetes.io/service-name=SVC</code><p>Empty: the Service selector matches no pod, or no pod is Ready.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl debug -it POD --image=nicolaka/netshoot --target=CTR</code><p>An ephemeral debug container that shares the target's process namespace.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl run dns --rm -it --restart=Never --image=busybox:1.36 -- nslookup SVC.NS.svc.cluster.local</code><p>Cluster DNS, tested from inside a pod.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl port-forward svc/SVC 8080:80</code><p>Reaches the Service directly, skipping the ingress. Tells you which side is broken. It picks one pod behind the Service and stays on it, with no load balancing, and it stops when that pod goes away.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl top pod -A --sort-by=memory</code><p>Live usage. Needs metrics-server.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl rollout undo deploy/APP</code><p>Back to the previous ReplicaSet. <code>kubectl rollout history deploy/APP</code> lists them.</p></div>
+<div class="r" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl auth can-i --list --as=system:serviceaccount:NS:SA -n NS</code><p>What a service account may do, for &quot;forbidden&quot; errors.</p></div>
+</div></div>
+<div class="grp"><h3>Pod states</h3><div class="t">
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>Pending</code><p>Cannot be scheduled. <code>describe</code> says why: Insufficient cpu or memory (requests too big), taints, node selectors, an unbound PVC.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>ImagePullBackOff</code><p>Wrong image name or tag, or a private registry without imagePullSecrets. On kind, load the image with <code>kind load docker-image IMG</code> and avoid <code>:latest</code>, which forces a pull.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>CrashLoopBackOff</code><p>The process keeps exiting. Read <code>logs --previous</code>, then the command, args, env and mounted config. A liveness probe killing a slow starter looks the same: add a startupProbe.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>OOMKilled</code><p>The container hit its memory limit (exit 137). Raise the limit or fix the leak; size JVM or V8 heaps below it.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>CreateContainerConfigError</code><p>A referenced Secret, ConfigMap or key does not exist.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>Running, READY 0/1</code><p>The readiness probe fails, so the pod is out of its Service and gets no traffic.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>Evicted</code><p>The node ran short of memory or disk. <code>kubectl describe node</code> shows its pressure conditions.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>Terminating, forever</code><p>A finalizer is waiting, or the node is gone. Check <code>.metadata.finalizers</code>. Force-delete only when you know the node is dead: a StatefulSet can end up with two pods.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>Ingress returns 503 or 404</code><p>503: the Service has no ready endpoints. 404: no host or path rule matches, or the wrong <code>ingressClassName</code>.</p></div>
+<div class="r x" data-in="Containers and Kubernetes Pod states"><code>external DNS slow in pods</code><p><code>ndots:5</code> makes every external name try each search domain first. Use a trailing dot (<code>api.example.com.</code>) or lower ndots in <code>dnsConfig</code>.</p></div>
+</div></div>
+</section>
+
+<section id="postgresql">
+<h2>PostgreSQL</h2>
+<p class="lede">Most incidents are a lock, a long transaction, connection exhaustion or a full disk. <code>pg_stat_activity</code> shows the first three.</p>
+<div class="grp"><h3>Connect</h3><div class="t">
+<div class="r" data-in="PostgreSQL Connect"><code class="k">pg_isready -h HOST -p 5432</code><p>Exit 0: accepting. 1: rejecting, usually still starting up. 2: no response.</p></div>
+<div class="r" data-in="PostgreSQL Connect"><code class="k">psql &quot;host=HOST dbname=app user=app sslmode=require&quot;</code><p>Then <code>\conninfo</code>, <code>\l</code>, <code>\dt+</code>, <code>\d+ TABLE</code>, <code>\x auto</code>, <code>\timing on</code>.</p></div>
+<div class="r" data-in="PostgreSQL Connect"><code class="k">SHOW hba_file;
+SELECT pg_reload_conf();</code><p>Where the auth rules live. A reload applies <code>pg_hba.conf</code> and most settings; <code>listen_addresses</code>, <code>max_connections</code> and <code>shared_buffers</code> need a restart.</p></div>
+<div class="r" data-in="PostgreSQL Connect"><code class="k">journalctl -u 'postgresql*' -n 100</code><p>The server log. On Debian and Ubuntu it is also under <code>/var/log/postgresql/</code>.</p></div>
+</div></div>
+<div class="grp"><h3>What is running</h3><div class="t">
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SELECT pid, usename, state, wait_event_type, wait_event,
+       now() - xact_start AS xact_age, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE state &lt;&gt; 'idle'
+ORDER BY xact_age DESC NULLS LAST;</code><p>Everything not idle, oldest transaction first. &quot;idle in transaction&quot; with a large age holds locks and stops vacuum; set <code>idle_in_transaction_session_timeout</code>.</p></div>
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SELECT pid, pg_blocking_pids(pid) AS blocked_by,
+       wait_event_type, left(query, 60) AS query
+FROM pg_stat_activity
+WHERE cardinality(pg_blocking_pids(pid)) &gt; 0;</code><p>Who waits on whom. Follow <code>blocked_by</code> to the root blocker, usually a long or idle-in-transaction session.</p></div>
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SELECT pg_cancel_backend(PID);</code><p>Cancels the running query. The session stays.</p></div>
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SELECT pg_terminate_backend(PID);</code><p>Ends the session and rolls back its transaction.</p></div>
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SELECT state, count(*) FROM pg_stat_activity GROUP BY 1;
+SHOW max_connections;</code><p>Connections by state, against the limit.</p></div>
+<div class="r" data-in="PostgreSQL What is running"><code class="k">SET lock_timeout = '5s';</code><p>Run it before <code>ALTER TABLE</code> in a migration. DDL waiting for a lock queues every later query behind it; this makes it give up instead.</p></div>
+</div></div>
+<div class="grp"><h3>Slow queries</h3><div class="t">
+<div class="r" data-in="PostgreSQL Slow queries"><code class="k">SELECT calls, round(total_exec_time) AS total_ms,
+       round(mean_exec_time::numeric, 1) AS mean_ms, left(query, 80) AS query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC LIMIT 10;</code><p>The queries that cost the most time in total. Needs <code>pg_stat_statements</code> in <code>shared_preload_libraries</code>, then <code>CREATE EXTENSION</code>.</p></div>
+<div class="r" data-in="PostgreSQL Slow queries"><code class="k">EXPLAIN (ANALYZE, BUFFERS) SELECT ...;</code><p>Runs the query for real. Look for estimated rows far from actual (run <code>ANALYZE</code> on the table), a Seq Scan on a big table with a selective filter (missing index), and &quot;external merge Disk&quot; (<code>work_mem</code> too small).</p></div>
+<div class="r" data-in="PostgreSQL Slow queries"><code class="k">BEGIN; SET LOCAL lock_timeout = '2s'; EXPLAIN ANALYZE UPDATE ...; ROLLBACK;</code><p>Analyzes a write and undoes it, but it runs for real: until ROLLBACK it holds its row locks, fires triggers and writes WAL, and sequence values and writes through foreign tables or dblink stay. The lock timeout keeps it from queueing behind others; on a busy table, run it on a copy (a replica cannot run an UPDATE).</p></div>
+<div class="r" data-in="PostgreSQL Slow queries"><code class="k">SELECT relname, seq_scan, idx_scan, n_live_tup
+FROM pg_stat_user_tables
+ORDER BY seq_scan DESC LIMIT 10;</code><p>Big tables read by sequential scans are index candidates.</p></div>
+</div></div>
+<div class="grp"><h3>Space and replication</h3><div class="t">
+<div class="r" data-in="PostgreSQL Space and replication"><code class="k">SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS size,
+       n_dead_tup, last_autovacuum
+FROM pg_stat_user_tables
+ORDER BY pg_total_relation_size(relid) DESC LIMIT 10;</code><p>Biggest tables and their dead rows. Many dead rows and an old <code>last_autovacuum</code>: vacuum cannot keep up, or an old transaction blocks it.</p></div>
+<div class="r" data-in="PostgreSQL Space and replication"><code class="k">SELECT slot_name, active,
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained
+FROM pg_replication_slots;</code><p>An inactive slot keeps WAL forever and fills the disk. If its consumer is gone: <code>SELECT pg_drop_replication_slot('NAME');</code></p></div>
+<div class="r" data-in="PostgreSQL Space and replication"><code class="k">SELECT client_addr, state, write_lag, replay_lag FROM pg_stat_replication;</code><p>On the primary: each replica and its lag.</p></div>
+<div class="r" data-in="PostgreSQL Space and replication"><code class="k">SELECT now() - pg_last_xact_replay_timestamp();</code><p>On a replica: the age of the last replayed change. It also grows when the primary is simply idle.</p></div>
+<div class="r" data-in="PostgreSQL Space and replication"><code class="k">SELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC;</code><p>Transaction ID age. Past a billion and climbing, vacuum is losing; near two billion PostgreSQL stops accepting writes.</p></div>
+</div></div>
+<div class="grp"><h3>PostgreSQL errors</h3><div class="t">
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>FATAL: sorry, too many clients already</code><p><code>max_connections</code> reached. Count app instances times pool size. Put PgBouncer in front rather than raising the limit: each connection is a process with its own memory.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>FATAL: remaining connection slots are reserved</code><p>The same limit; only the reserved superuser slots remain.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>FATAL: no pg_hba.conf entry for host</code><p>No rule matches this host, user, database and SSL mode. Rules match top to bottom and the first match wins. Add one, then <code>pg_reload_conf()</code>.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>FATAL: password authentication failed for user</code><p>A wrong password, or the stored hash is md5 while <code>pg_hba.conf</code> asks for scram-sha-256: set <code>password_encryption</code>, then reset the password.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>connection to server at &quot;HOST&quot;, port 5432 failed: Connection refused</code><p>The server is down, or <code>listen_addresses</code> is 'localhost'. Changing it needs a restart.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>ERROR: deadlock detected</code><p>Two transactions locked the same rows in opposite orders. Lock in one consistent order and retry the loser; the server log has both queries.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>canceling statement due to statement timeout</code><p><code>statement_timeout</code> hit: a slow query, or one stuck behind a lock (check <code>pg_blocking_pids</code>).</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>canceling statement due to conflict with recovery</code><p>On a replica: vacuum on the primary removed rows your query still needed. Turn on <code>hot_standby_feedback</code> or raise <code>max_standby_streaming_delay</code>.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>server closed the connection unexpectedly</code><p>The backend died (look for &quot;terminated by signal 9&quot; in the server log and the OOM killer in <code>dmesg</code>), or a firewall or load balancer dropped an idle connection. Enable TCP keepalives and cap the pool's connection lifetime.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>duplicate key value violates unique constraint &quot;..._pkey&quot;</code><p>Right after a restore: the sequence is behind the data. <code>SELECT setval(pg_get_serial_sequence('T', 'id'), max(id)) FROM T;</code></p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>could not extend file: No space left on device</code><p>Disk full. Check <code>pg_wal</code> and replication slots before deleting anything, and never delete WAL files by hand.</p></div>
+<div class="r x" data-in="PostgreSQL PostgreSQL errors"><code>the database system is starting up</code><p>Crash recovery is replaying WAL. Wait and watch the server log.</p></div>
+</div></div>
+</section>
+
+<section id="mysql-and-mariadb">
+<h2>MySQL and MariaDB</h2>
+<p class="lede">The processlist and InnoDB's status report cover locks, long transactions and deadlocks. Commands are for MySQL 8.0.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="MySQL and MariaDB"><code class="k">mysqladmin -h HOST ping</code><p>&quot;mysqld is alive&quot; when the server answers.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SHOW FULL PROCESSLIST;</code><p>Every connection, what it runs and for how long. Many Sleep rows: a pool holding idle connections.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SELECT id, user, host, db, command, time, state, left(info, 80) AS query
+FROM information_schema.processlist
+WHERE command &lt;&gt; 'Sleep' ORDER BY time DESC;</code><p>The same without the sleepers, longest first.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">KILL QUERY ID;</code><p>Stops the statement. <code>KILL ID;</code> drops the whole connection.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SELECT * FROM sys.innodb_lock_waits\G</code><p>Who blocks whom, with a ready-made kill statement in <code>sql_kill_blocking_query</code>.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SHOW ENGINE INNODB STATUS\G</code><p>Read LATEST DETECTED DEADLOCK and TRANSACTIONS: lock waits, and transactions open for a long time.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SHOW GLOBAL STATUS LIKE 'Threads_connected';
+SHOW VARIABLES LIKE 'max_connections';</code><p>Connections against the limit.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SET GLOBAL slow_query_log = ON;
+SET GLOBAL long_query_time = 1;</code><p>Logs statements over 1 s; new connections pick up the threshold. <code>SET GLOBAL</code> is lost at the next restart; <code>SET PERSIST</code> (MySQL 8) keeps it. Summarize with <code>mysqldumpslow -s t</code> or pt-query-digest.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">EXPLAIN ANALYZE SELECT ...;</code><p>Runs it and shows the actual time per step (8.0.18+). In plain <code>EXPLAIN</code>, type ALL is a full table scan.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SHOW REPLICA STATUS\G</code><p>Replica_IO_Running and Replica_SQL_Running must both say Yes. Then read Seconds_Behind_Source and Last_SQL_Error. Before 8.0.22: <code>SHOW SLAVE STATUS</code>.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SELECT table_schema, table_name,
+       round((data_length + index_length) / 1048576) AS mb
+FROM information_schema.tables ORDER BY mb DESC LIMIT 10;</code><p>Largest tables. InnoDB's numbers are estimates.</p></div>
+<div class="r" data-in="MySQL and MariaDB"><code class="k">SELECT user, host, plugin FROM mysql.user;</code><p>Accounts and the hosts they may connect from.</p></div>
+</div></div>
+<div class="grp"><h3>MySQL errors</h3><div class="t">
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 1040: Too many connections</code><p><code>max_connections</code> reached. Look for Sleep connections from a leaking pool. One extra slot stays free for an admin with CONNECTION_ADMIN.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 1045: Access denied for user 'app'@'10.0.0.7'</code><p>The account exists for another host: 'app'@'localhost' and 'app'@'%' are different users. localhost means the Unix socket; use 127.0.0.1 to force TCP.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 2002: Can't connect to local MySQL server through socket</code><p>The server is down, or the client looks for the socket at another path.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 2003: Can't connect to MySQL server on 'HOST' (111)</code><p>111 is refused: the server is down or <code>bind-address</code> is 127.0.0.1. 110 is a timeout: a firewall.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 1205: Lock wait timeout exceeded</code><p>Another transaction holds the row, often one left open and idle. Only the statement rolls back, not the transaction, unless <code>innodb_rollback_on_timeout</code> is on.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 1213: Deadlock found when trying to get lock</code><p>InnoDB rolled back one transaction; retry it. The details are under LATEST DETECTED DEADLOCK.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 2006: MySQL server has gone away</code><p><code>wait_timeout</code> closed an idle connection (validate or recycle pooled connections sooner), a packet exceeded <code>max_allowed_packet</code>, or the server restarted (<code>SHOW GLOBAL STATUS LIKE 'Uptime'</code>). 2013 Lost connection has the same causes.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>Host 'HOST' is blocked because of many connection errors</code><p>Often a load balancer health check opening TCP without speaking MySQL. Run <code>TRUNCATE performance_schema.host_cache</code> (<code>FLUSH HOSTS</code> before 8.0.23), raise <code>max_connect_errors</code>, fix the check.</p></div>
+<div class="r x" data-in="MySQL and MariaDB MySQL errors"><code>ERROR 1114: The table is full</code><p>Usually disk or tmpdir space, not a row limit.</p></div>
+</div></div>
+</section>
+
+<section id="redis">
+<h2>Redis</h2>
+<p class="lede">One command thread serves everyone, so a single slow command stalls every client.</p>
+<div class="grp"><div class="t">
+<div class="r" data-in="Redis"><code class="k">read -rs REDISCLI_AUTH &amp;&amp; export REDISCLI_AUTH &amp;&amp; redis-cli -h HOST ping</code><p>PONG means up. <code>read -s</code> takes the password without echo and keeps it out of shell history; the variable keeps it out of <code>ps</code>. With <code>-a</code> every user on the host can see it.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli INFO memory</code><p><code>used_memory_human</code> against <code>maxmemory_human</code>. <code>mem_fragmentation_ratio</code> above 1.5 is fragmentation.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli INFO clients</code><p><code>connected_clients</code> and <code>blocked_clients</code>. <code>CLIENT LIST</code> shows each one.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli SLOWLOG GET 10</code><p>The slowest recent commands with their arguments.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli --bigkeys -i 0.1</code><p>The biggest key per type. It uses SCAN, so it does not block like KEYS, but it walks the whole keyspace: <code>-i 0.1</code> pauses between batches, and on a busy primary it belongs on a replica. <code>--memkeys</code> gives sizes in bytes.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli --latency</code><p>Round-trip latency, live. Spikes with a quiet SLOWLOG point to the fork for persistence, or the network.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli INFO persistence</code><p><code>rdb_last_bgsave_status</code> and <code>aof_last_write_status</code> must read ok.</p></div>
+<div class="r" data-in="Redis"><code class="k">redis-cli INFO replication</code><p>The role, connected replicas, and <code>master_link_status</code> on a replica.</p></div>
+<div class="r x" data-in="Redis"><code>KEYS *</code><p>Blocks the command thread for the whole keyspace. Use <code>SCAN 0 MATCH 'user:*' COUNT 1000</code> instead.</p></div>
+<div class="r x" data-in="Redis"><code>MONITOR</code><p>Streams every command and costs a large share of throughput. Seconds only, in production.</p></div>
+</div></div>
+<div class="grp"><h3>Redis errors</h3><div class="t">
+<div class="r x" data-in="Redis Redis errors"><code>OOM command not allowed when used memory &gt; 'maxmemory'</code><p>Full, with <code>maxmemory-policy</code> noeviction. A cache wants allkeys-lru; a datastore needs more memory.</p></div>
+<div class="r x" data-in="Redis Redis errors"><code>MISCONF Redis is configured to save RDB snapshots, but it's currently unable to persist to disk</code><p>The background save failed: disk full, permissions, or the fork was refused memory (set <code>vm.overcommit_memory = 1</code>). Writes are refused until a save succeeds.</p></div>
+<div class="r x" data-in="Redis Redis errors"><code>LOADING Redis is loading the dataset in memory</code><p>It just restarted. Wait.</p></div>
+<div class="r x" data-in="Redis Redis errors"><code>READONLY You can't write against a read only replica</code><p>You reached a replica. After a failover the client still points at the old primary; use a Sentinel- or Cluster-aware client.</p></div>
+<div class="r x" data-in="Redis Redis errors"><code>NOAUTH Authentication required</code><p>No credentials sent. WRONGPASS: a wrong password, or an ACL user without access.</p></div>
+</div></div>
+</section>
+
+<p id="none" class="none" hidden>Nothing matches. Try fewer words, an errno name or a status code.</p>
+<p id="status" class="sr" role="status" aria-live="polite"></p>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Written for Linux with systemd, OpenSSL 1.1.1 or later, PostgreSQL 13+, MySQL 8.0 and Redis 6+. Searchable, click-to-copy and offline: <a href="https://makavli.github.io/server-triage/">the app</a>.</p>
+    <p>Version 1.0.0, free under the MIT licence. Source, issues and the Markdown copy: <a href="https://github.com/makavli/server-triage">github.com/makavli/server-triage</a>.</p>
+  </div>
+</footer>
+
+<div id="toast" class="toast" aria-hidden="true"></div>
+<script>// Search, copy, the offline copy and the Install button. The page reads in full without it.
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const q = $('#q');
+  const none = $('#none');
+  const status = $('#status');
+  const toast = $('#toast');
+
+  // Each entry is searched by its own text and by the names of its section and group.
+  const sections = [...document.querySelectorAll('main section')].map((el) => ({
+    el,
+    groups: [...el.querySelectorAll('.grp')].map((g) => ({
+      el: g,
+      items: [...g.querySelectorAll('[data-in]')].map((it) => ({ el: it, text: `${it.dataset.in} ${it.textContent}`.toLowerCase() })),
+    })),
+  }));
+
+  // Every word must match, in any order: "postgresql lock" finds the lock rows of the PostgreSQL section.
+  function search() {
+    const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const s of sections) {
+      let any = false;
+      for (const g of s.groups) {
+        let hit = false;
+        for (const it of g.items) {
+          const ok = words.every((w) => it.text.includes(w));
+          it.el.hidden = !ok;
+          if (ok) { hit = true; shown++; }
+        }
+        g.el.hidden = !hit;
+        any ||= hit;
+      }
+      s.el.hidden = !any;
+    }
+    none.hidden = shown > 0;
+    status.textContent = words.length ? `${shown} ${shown === 1 ? 'entry matches' : 'entries match'}` : '';
+  }
+  q.addEventListener('input', search);
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && q.value) { q.value = ''; search(); }
+  });
+  document.addEventListener('keydown', (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '');
+    if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); q.focus(); q.select(); }
+  });
+
+  let timer;
+  function say(msg) {
+    toast.textContent = msg;
+    toast.classList.add('on');
+    status.textContent = msg;
+    clearTimeout(timer);
+    timer = setTimeout(() => toast.classList.remove('on'), 1600);
+  }
+
+  // A command copies on click, Enter or Space. Where the clipboard is refused, it is selected for Ctrl+C instead.
+  async function copy(el) {
+    try {
+      await navigator.clipboard.writeText(el.textContent);
+      say('Copied');
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      say('Selected. Press Ctrl+C to copy');
+    }
+  }
+  for (const k of document.querySelectorAll('code.k')) {
+    k.tabIndex = 0;
+    k.setAttribute('role', 'button');
+    k.title = 'Copy';
+  }
+  document.addEventListener('click', (e) => {
+    const k = e.target.closest?.('code.k');
+    if (k && !String(getSelection())) copy(k); // a drag that selects part of a command is left alone
+  });
+  document.addEventListener('keydown', (e) => {
+    const k = e.target.closest?.('code.k');
+    if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); copy(k); }
+  });
+
+  // The app's manifest and offline copy, over http(s) only: a page opened from disk is offline already, and the
+  // browser refuses a manifest there. Trusted Types guard the worker's URL, as the page's policy requires.
+  const served = /^https?:$/.test(location.protocol);
+  if (served) {
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = 'manifest.webmanifest';
+    document.head.append(link);
+  }
+  if (served && 'serviceWorker' in navigator) {
+    const tt = window.trustedTypes;
+    const url = tt
+      ? tt.createPolicy('triage', { createScriptURL: (u) => { if (u !== 'sw.js') throw new TypeError(`refused worker ${u}`); return u; } }).createScriptURL('sw.js')
+      : 'sw.js';
+    navigator.serviceWorker.register(url).catch((err) => console.warn('No offline copy:', err.message));
+  }
+
+  // Edge and Chrome offer to install the page as an app; the button appears only when they would.
+  const install = $('#install');
+  let offer = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); offer = e; install.hidden = false; });
+  install.addEventListener('click', async () => {
+    if (!offer) return;
+    install.hidden = true;
+    offer.prompt();
+    await offer.userChoice;
+    offer = null;
+  });
+  addEventListener('appinstalled', () => { install.hidden = true; offer = null; });
+
+  document.documentElement.dataset.ready = '1';
+})();
+</script>
+</body>
+</html>
