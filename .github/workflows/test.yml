@@ -159,6 +159,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      actions: read # to see this run's artifact before the deploy looks for it
       pages: write
       id-token: write
     environment:
@@ -188,6 +189,20 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/site
+      - name: Wait until the run lists the artifact
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # The deploy looks the artifact up once, and the listing can lag behind the upload: it once found none 0.6 s
+          # after the upload ended. A rerun of this job then finds two (artifacts belong to the run): delete the old one.
+          for i in $(seq 30); do
+            n="$(gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages" --jq .total_count || echo 0)" # a failed call counts as not yet
+            [ "$n" -ge 1 ] && exit 0
+            sleep 1
+          done
+          echo "::error::The github-pages artifact was not listed after 30 s."; exit 1
       - id: deploy
         if: steps.head.outputs.current == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

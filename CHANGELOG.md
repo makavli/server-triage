@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 (2026-11-20)
+
+- The sheet, checked on real servers (MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, Redis 7.0 to 7.4, Valkey 8, Envoy 1.32, OpenSearch 2.19, containerd 2 on kind, conntrack-tools 1.4.6 to 1.4.8) and against the upstream release notes. Fixed: the `readyz?verbose` filter now works when a check fails (kubectl prints the whole list as one line; the command changed, so a pin or a note on it moves to Your data), when mysqldump needs RELOAD (`--single-transaction` only with GTIDs on and `--set-gtid-purged` not OFF; `--source-data` and `--flush-logs` always), what `FLUSH HOSTS` does on MySQL 8.0 (a deprecation warning), the OpenSearch `_cat/nodes` column (`cluster_manager`, with `master` as an alias), `s_client -brief` (about ten lines), where containerd 2 keeps the pause image, what a current crictl says without a config, and which kernel and conntrack-tools print `chaintoolong`. Said: what Envoy's `config_dump` redacts and what it does not, where Patroni keeps its passwords, that `pg_file_settings` shows a `primary_conninfo` password, and that MariaDB leaves `performance_schema` off. Confirmed as written: the `systemd243+`, `rabbitmq4.0.8+` and `redis7.4+` tags, MariaDB's table, and the 10 days its Docker image keeps binlogs.
+- A screen reader hears a message again when it repeats (two copies in a row both say "Copied").
+- The browser tests start each test on a fresh browser and profile.
+
 ## 1.1.2 (2026-11-20)
 
 - Copy: a command that still holds a blank you have not filled names it in the toast ("Copied with HOST still to fill"), and a held Enter copies once.

@@ -1526,7 +1526,7 @@ The connection tracking table. When it is full the kernel drops new connections 
 conntrack -S
 ```
 
-One line per CPU. **insert_failed**, **drop**, **early_drop** and **invalid** rising mean the table is full or NAT collisions are happening. **chaintoolong** points at a hash table that is too small.
+One line per CPU. **insert_failed**, **drop**, **early_drop** and **invalid** rising mean the table is full or NAT collisions are happening. **chaintoolong** (kernel 5.16 and conntrack-tools 1.4.7 and later; 1.4.6, as on Ubuntu 22.04, prints it as the second `(null)`) points at a hash table that is too small.
 
 ```sh
 conntrack -L -p tcp --state ESTABLISHED | wc -l
@@ -1706,7 +1706,7 @@ The handshake, the chain the server sends, and "Verify return code: 0 (ok)". Wit
 openssl s_client -connect HOST:443 -servername HOST -brief </dev/null
 ```
 
-Five lines instead of a page: **Protocol version**, **Ciphersuite**, the peer certificate and **Verification**. Use it in scripts and for a quick look.
+About ten lines instead of a page: **Protocol version**, **Ciphersuite**, the peer certificate and **Verification**. Use it in scripts and for a quick look.
 
 ```sh
 openssl s_client -connect HOST:443 -servername HOST </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
@@ -2385,7 +2385,7 @@ The listeners and their addresses. A missing one means it failed to bind or neve
 curl -s localhost:9901/config_dump > envoy-config.json
 ```
 
-Everything Envoy runs now, including routes and clusters pushed by xDS. Look for `dynamic_warming_clusters`: a cluster stuck there never became ready. It is large, so save it and search.
+Everything Envoy runs now, including routes and clusters pushed by xDS. Look for `dynamic_warming_clusters`: a cluster stuck there never became ready. It is large, so save it and search. TLS private keys and passwords print as `[redacted]`, but other values print in clear, such as a token in a header a route adds: keep the file private.
 
 ```sh
 curl -s localhost:9901/certs
@@ -3125,7 +3125,7 @@ A pull secret built from a Docker `config.json`, so no password appears on the c
 sudo crictl images | head; sudo crictl info | grep -iE 'sandboxImage|runtimeType' | head -3
 ```
 
-On the node: the images the runtime holds. The runtime caches by digest, so with `imagePullPolicy: IfNotPresent` a mutable tag that moved is still the old image on nodes that already pulled it.
+On the node: the images the runtime holds. The runtime caches by digest, so with `imagePullPolicy: IfNotPresent` a mutable tag that moved is still the old image on nodes that already pulled it. containerd 2 no longer shows the pause image in `crictl info`: run `sudo containerd config dump | grep -A1 pinned_images`.
 
 ### Volumes and PVCs
 
@@ -3303,7 +3303,7 @@ A ResourceQuota in the namespace blocks the create. `kubectl describe quota -n N
 sudo crictl ps -a --name CTR
 ```
 
-Containers as the runtime sees them, with state and attempt number. Works when the API server is down. If it fails with "unix:///var/run/dockershim.sock", set `CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock`.
+Containers as the runtime sees them, with state and attempt number. Works when the API server is down. Without `/etc/crictl.yaml` it warns and tries the default sockets; if it still cannot connect (an old crictl names "unix:///var/run/dockershim.sock"), set `CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock`.
 
 ```sh
 sudo crictl logs --tail 50 ID
@@ -3338,10 +3338,10 @@ crictl cannot reach the runtime socket: containerd is down, or the endpoint is w
 ### Control plane, etcd and certificates
 
 ```sh
-kubectl get --raw='/readyz?verbose' 2>&1 | grep -v ' ok$'
+kubectl get --raw='/readyz?verbose' 2>&1 | awk '{gsub(/\\n/, "\n")} 1' | grep -v ' ok$'
 ```
 
-Only the failing checks, such as `[-]etcd failed`, or `readyz check passed`. A failure comes back as an HTTP 500 error that holds the whole list. `/livez?verbose` is the liveness equivalent.
+Only the failing checks, such as `[-]etcd failed`, or `readyz check passed`. A failure comes back as an HTTP 500 that kubectl prints as one error line holding the whole list: the awk splits it so the filter still works. `/livez?verbose` is the liveness equivalent.
 
 ```sh
 kubectl get pods -n kube-system -o wide
@@ -5585,7 +5585,7 @@ One row per failover, with the old timeline **TL**, the **LSN** where it ended, 
 patronictl -c FILE show-config
 ```
 
-The dynamic configuration stored in the DCS (`ttl`, `loop_wait`, `retry_timeout`, `maximum_lag_on_failover`, `postgresql.parameters`). If the DCS is unreachable longer than `retry_timeout`, a primary demotes itself to protect data. Compare with the local `patroni.yml` for drift.
+The dynamic configuration stored in the DCS (`ttl`, `loop_wait`, `retry_timeout`, `maximum_lag_on_failover`, `postgresql.parameters`). If the DCS is unreachable longer than `retry_timeout`, a primary demotes itself to protect data. Compare with the local `patroni.yml` for drift. The replication and superuser passwords stay in `patroni.yml`, not here, unless a setting such as `archive_command` was given one.
 
 ```sh
 curl -s -o /dev/null -w '%{http_code}\n' http://HOST:8008/primary
@@ -5745,7 +5745,7 @@ SELECT sourcefile, sourceline, name, setting, applied, error
 FROM pg_file_settings WHERE error IS NOT NULL OR NOT applied;
 ```
 
-Checks config files before or after a reload. A row with an **error** shows the file and line of a bad value; the rest of the file is still applied. Run it after editing, before `pg_reload_conf()`.
+Checks config files before or after a reload. A row with an **error** shows the file and line of a bad value; the rest of the file is still applied. Run it after editing, before `pg_reload_conf()`. The **setting** column shows each value as written, a password in `primary_conninfo` included.
 
 ```text
 LOG:  invalid value for parameter "work_mem": "99xx"
@@ -6025,7 +6025,7 @@ The same on MariaDB, which keeps status in `information_schema.global_status` (M
 TRUNCATE performance_schema.host_cache;
 ```
 
-Clears the host cache, which unblocks a host that hit `max_connect_errors`. Use `FLUSH HOSTS;` on MariaDB; on MySQL 8.4 it is a syntax error, and before 8.0.23 it was the way.
+Clears the host cache, which unblocks a host that hit `max_connect_errors`. Use `FLUSH HOSTS;` on MariaDB; MySQL 8.0 still takes it with a deprecation warning, and 8.4 rejects it as a syntax error.
 
 ```sql mysql8.0.22+
 SELECT logged, prio, error_code, subsystem, left(data, 120) AS message
@@ -6343,7 +6343,7 @@ SELECT worker_id, service_state, last_error_number, left(last_error_message, 150
 FROM performance_schema.replication_applier_status_by_worker;
 ```
 
-Per-worker state of the SQL applier. The real error and the failed transaction are here when `Last_SQL_Error` only says "Coordinator stopped because there were error(s) in the worker(s)". MariaDB has this table with other columns (no `worker_id`), so the query is MySQL only.
+Per-worker state of the SQL applier. The real error and the failed transaction are here when `Last_SQL_Error` only says "Coordinator stopped because there were error(s) in the worker(s)". MariaDB has this table with other columns (no `worker_id`) and leaves `performance_schema` off by default, so the query is MySQL only.
 
 ```sql mysql8.0+
 SELECT service_state, last_error_number, left(last_error_message, 150) AS error, received_transaction_set
@@ -6650,7 +6650,7 @@ The name does not resolve. Check DNS with `getent hosts` from the same machine.
 Host 'HOST' is blocked because of many connection errors; unblock with 'mysqladmin flush-hosts'
 ```
 
-Error 1129. Often a load balancer health check opening TCP without speaking MySQL. Run `TRUNCATE performance_schema.host_cache` (`FLUSH HOSTS` before 8.0.23 and on MariaDB), raise `max_connect_errors`, fix the check. Not reproduced on loopback; text from the manual.
+Error 1129. Often a load balancer health check opening TCP without speaking MySQL. Run `TRUNCATE performance_schema.host_cache` (`FLUSH HOSTS` on MariaDB; MySQL 8.0 warns it is deprecated, 8.4 refuses it), raise `max_connect_errors`, fix the check. Not reproduced on loopback; text from the manual.
 
 ```text
 ERROR 1130 (HY000): Host 'IP' is not allowed to connect to this MySQL server
@@ -6858,7 +6858,7 @@ Restoring a dump that holds `SET @@GLOBAL.GTID_PURGED` onto a server that alread
 mysqldump: Couldn't execute 'FLUSH TABLES': Access denied; you need (at least one of) the RELOAD or FLUSH_TABLES privilege(s) for this operation (1227)
 ```
 
-`--single-transaction` flushes tables first on MySQL. Grant RELOAD (or FLUSH_TABLES). A second message about PROCESS and tablespaces goes away with `--no-tablespaces`. MariaDB's dump did not need RELOAD in a test.
+On MySQL, `--single-transaction` flushes tables first when GTIDs are on and `--set-gtid-purged` is AUTO (the default) or ON; `--source-data` and `--flush-logs` always do, and 8.4 prints the statement as `FLUSH /*!40101 LOCAL */ TABLES`. Grant RELOAD (or FLUSH_TABLES), or add `--set-gtid-purged=OFF` when the dump will not seed a replica. A second message about PROCESS and tablespaces goes away with `--no-tablespaces`. MariaDB's dump did not need RELOAD in a test.
 
 ```text
 mariabackup: Error: missing required privilege PROCESS on *.*
@@ -8719,7 +8719,7 @@ HTTP 401: wrong password for that user. With no credentials sent the text is `mi
 curl -sS --cacert /usr/share/opensearch/config/root-ca.pem --netrc-file ~/.es.netrc 'https://HOST:9200/_cat/cluster_manager?v'
 ```
 
-OpenSearch renamed the elected master to **cluster manager** (the demo Docker image logs in as `admin` and keeps its CA as `root-ca.pem` in the config folder). `_cat/nodes` shows both a **cluster_manager** and a **master** column. Health also reports `discovered_cluster_manager`.
+OpenSearch renamed the elected master to **cluster manager** (the demo Docker image logs in as `admin` and keeps its CA as `root-ca.pem` in the config folder). `_cat/nodes` names the column **cluster_manager**; `master` still works in `h=` as an alias. Health also reports `discovered_cluster_manager`.
 
 ```sh opensearch2+
 curl -sS --cacert /usr/share/opensearch/config/root-ca.pem --netrc-file ~/.es.netrc 'https://HOST:9200/_plugins/_security/authinfo?pretty'
