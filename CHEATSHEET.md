@@ -185,7 +185,7 @@ ENOMEM. A fork or mmap was refused: a cgroup or `ulimit -v` limit, strict overco
 Resource temporarily unavailable
 ```
 
-EAGAIN. On a non-blocking socket read or accept it is normal flow control, not a fault. From `fork` or `pthread_create` it is the process or thread limit (see the fork entry). From `flock -n` it means another process holds the lock: `lslocks`.
+EAGAIN. On a non-blocking socket read or accept it is normal flow control, not a fault. From `fork` or `pthread_create` it is the process or thread limit (see the fork entry). `flock -n` exits 1 silently when another process holds the lock (`lslocks`); a program that hits a held lock may print this message.
 
 ```text
 fork: Resource temporarily unavailable
@@ -466,7 +466,7 @@ Checks an `OnCalendar=` expression and prints its normalised form and the next r
 sudo cat /etc/crontab /etc/cron.d/*
 ```
 
-System crontabs carry a sixth field, the user (`* * * * * root command`); a user's `crontab -e` has none, and a missing field is the commonest silent failure. cron's PATH is short, and a bare `%` ends the command: write `\%`. Debian cron ignores `/etc/cron.d` files with a dot in the name.
+System crontabs carry a sixth field, the user (`* * * * * root command`); a user's `crontab -e` has none, and a missing field is the commonest silent failure. cron's PATH is short, and a bare `%` ends the command: write `\%`. Debian cron ignores `/etc/cron.d` files with a dot in the name. The output may show passwords in command lines.
 
 ```sh deb
 run-parts --test /etc/cron.daily
@@ -799,13 +799,13 @@ Inodes. 100% used with free space left means millions of small files: sessions, 
 sudo ionice -c3 du -xhd1 / 2>/dev/null | sort -h | tail
 ```
 
-Biggest directories; `-x` stays on one filesystem. As root so no directory is skipped, at idle I/O priority so it does not starve the disk. Repeat one level down.
+Biggest directories; `-x` stays on one filesystem. As root so no directory is skipped, at idle I/O priority so it does not starve the disk. That holds only where the disk's scheduler honours priorities (`cat /sys/block/DISK/queue/scheduler`): `bfq` does, `none`, common on NVMe, does not. Repeat one level down.
 
 ```sh
-sudo find / -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null | sort -rn | head
+sudo ionice -c3 find / -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null | sort -rn | head
 ```
 
-The biggest single files on the root filesystem, in bytes. Repeat with another mount point for other filesystems. Add `-mtime -1` to see only what grew today.
+The biggest single files on the root filesystem, in bytes. Repeat with another mount point for other filesystems. Add `-mtime -1` to see only what grew today. It walks the whole tree, so it runs at idle I/O priority.
 
 ```sh
 for d in /var/*/; do echo "$(sudo find "$d" -xdev 2>/dev/null | wc -l) $d"; done | sort -rn | head
@@ -817,7 +817,7 @@ Entries per directory: where the inodes went when `df -i` says full. Change `/va
 sudo lsof +L1
 ```
 
-Deleted files still held open. When `df` says full and `du` cannot find it, it is usually these; otherwise files hidden under a mount point (`mount --bind / /mnt` and run `du` on `/mnt`). Restart the holder. For a log only, truncate it with `sudo truncate -s 0 /proc/PID/fd/N`, after copying it to another filesystem if you need it. Never truncate a live database file or WAL: the process still uses it. A writer that does not append keeps its offset, so the file comes back sparse.
+Deleted files still held open. When `df` says full and `du` cannot find it, it is usually these; otherwise files hidden under a mount point (`mount --bind / /mnt` and run `du` on `/mnt`). `lsof` can hang on a dead NFS mount. Restart the holder. For a log only, truncate it with `sudo truncate -s 0 /proc/PID/fd/N`, after copying it to another filesystem if you need it. Never truncate a live database file or WAL: the process still uses it. A writer that does not append keeps its offset, so the file comes back sparse.
 
 ```sh
 sudo find /proc/[0-9]*/fd -lname '*(deleted)' -printf '%p -> %l\n' 2>/dev/null | head
@@ -1112,7 +1112,7 @@ Per-mount NFS rates: operations a second, kB a second, retransmissions and **avg
 rpcinfo -p HOST
 ```
 
-The RPC services the server has registered. NFSv3 needs `portmapper`, `mountd` and `nfs`; NFSv4 needs only TCP port 2049. "Connection refused" or a timeout means the firewall or rpcbind is down.
+The RPC services the server has registered. NFSv3 needs `portmapper`, `mountd` and `nfs`, and for locking `nlockmgr` and `status`; NFSv4 needs only TCP port 2049. "Connection refused" or a timeout means the firewall or rpcbind is down.
 
 ```sh
 showmount -e HOST
@@ -1532,7 +1532,7 @@ One line per CPU. **insert_failed**, **drop**, **early_drop** and **invalid** ri
 conntrack -L -p tcp --state ESTABLISHED | wc -l
 ```
 
-How many established flows are tracked. It lists from the same table the sysctl counts. Replace `ESTABLISHED` with `TIME_WAIT` or `SYN_SENT` to see which state fills it.
+How many established flows are tracked. It lists from the same table the sysctl counts. Heavy on a full table: `conntrack -C` counts the entries without listing them. Replace `ESTABLISHED` with `TIME_WAIT` or `SYN_SENT` to see which state fills it.
 
 ```sh
 sysctl net.netfilter.nf_conntrack_tcp_timeout_established
@@ -1594,7 +1594,7 @@ Adds the age of each entry and the probe count. Many entries in INCOMPLETE toget
 arping -c 3 -I IFACE IP
 ```
 
-Asks who has that address at layer 2, with no IP routing involved. A reply from two different MAC addresses is a duplicate IP address.
+Asks who has that address at layer 2, with no IP routing involved. A reply from two different MAC addresses is a duplicate IP address. This is the iputils `arping`; the Habets one takes `-i` for the interface.
 
 ```text
 arp_cache: neighbor table overflow!
@@ -1905,7 +1905,7 @@ The expiry of a certificate stored in a Kubernetes TLS secret. Cert-manager rene
 certbot certificates
 ```
 
-Every certificate certbot manages, its domains, the **Expiry Date** and "VALID: N days". If renewal failed, `certbot renew --dry-run` shows why.
+Every certificate certbot manages, its domains, the **Expiry Date** and "VALID: N days". If renewal failed, `certbot renew --dry-run` shows why. It runs your `--pre-hook` and `--post-hook` (not `--deploy-hook`), reloads nginx or apache when those plugins are used, and `--standalone` needs port 80 free.
 
 ### Mutual TLS (client certificates)
 
@@ -2107,7 +2107,7 @@ The JVM spoke TLS to a port that answered in plain text, or the reverse. Check t
 tls: failed to verify certificate: x509: certificate signed by unknown authority
 ```
 
-Go does not trust the issuer: a private CA, or a missing intermediate. Go uses the system store. `SSL_CERT_FILE` replaces it with one bundle, so that file must hold the public roots too. `SSL_CERT_DIR` adds directories. Older Go versions print only the "x509:" part.
+Go does not trust the issuer: a private CA, or a missing intermediate. Go uses the system store. `SSL_CERT_FILE` replaces the default bundle file, so that file must hold the public roots too. `SSL_CERT_DIR` replaces the default list of directories. Older Go versions print only the "x509:" part.
 
 ```text
 x509: certificate is valid for other.test, not srv.test
@@ -2243,7 +2243,7 @@ An access line from a `log_format` with `$request_time` (**rt**), `$upstream_res
 haproxy -c -f /etc/haproxy/haproxy.cfg
 ```
 
-Checks the config without starting. A valid file prints nothing and exits 0, so test the exit status; warnings and errors print with the line number.
+Checks the config without starting. A valid file prints `Configuration file is valid` (nothing with `-q`) and exits 0, so test the exit status; warnings and errors print with the line number.
 
 ```sh changes
 haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl reload haproxy
@@ -2291,7 +2291,7 @@ For servers resolved through DNS: queries sent, valid answers, and errors such a
 echo 'set server BACKEND/SRVNAME state drain' | socat stdio /run/haproxy/admin.sock
 ```
 
-Stops new sessions to one server and lets the open ones finish. `state ready` puts it back. `disable server BACKEND/SRVNAME` takes it out at once, and `enable server` returns it.
+Stops new sessions to one server and lets the open ones finish. `state ready` puts it back. `disable server BACKEND/SRVNAME` takes it out at once, and `enable server` returns it. These commands need a `stats socket` line with `level admin`.
 
 ### HAProxy log lines
 
@@ -2575,7 +2575,7 @@ A redirect loop, shown by curl as exit 47, "Maximum (50) redirects followed". Of
 WebSocket drops after exactly 60 seconds
 ```
 
-nginx closes an idle upgraded connection after `proxy_read_timeout`. Raise it for that location, or send pings. Without `proxy_set_header Upgrade $http_upgrade` and `Connection "upgrade"` it fails at once.
+nginx closes an idle upgraded connection after `proxy_read_timeout`. Raise it for that location, or send pings. Without `proxy_http_version 1.1;`, `proxy_set_header Upgrade $http_upgrade` and `Connection "upgrade"` it fails at once.
 
 ### nginx error log
 
@@ -2889,7 +2889,7 @@ The Events of one object. Needs kubectl 1.26 or later (**k8s1.26+**).
 kubectl get endpointslices -l kubernetes.io/service-name=SVC
 ```
 
-Empty: the Service selector matches no pod, or no pod is Ready.
+Empty: no pod matches the Service selector, or the Service has no selector.
 
 ```sh
 kubectl get endpointslices -l kubernetes.io/service-name=SVC -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]}{" ready="}{.conditions.ready}{"\n"}{end}'
@@ -2996,7 +2996,7 @@ systemctl is-active kubelet containerd; journalctl -u kubelet --since '15 min ag
 On the node itself: the two services, then the kubelet's recent log. It names failed mounts, probes, evictions and certificate errors.
 
 ```text
-evictionHard: memory.available<100Mi, nodefs.available<10%, imagefs.available<15%
+evictionHard: memory.available<100Mi, nodefs.available<10%, imagefs.available<15%, nodefs.inodesFree<5%
 ```
 
 The kubelet's default hard eviction thresholds. Below one, the kubelet evicts pods (BestEffort first, then Burstable above their requests) and sets a pressure condition. Check `/var/lib/kubelet/config.yaml` for the real values.
@@ -3125,7 +3125,7 @@ A pull secret built from a Docker `config.json`, so no password appears on the c
 sudo crictl images | head; sudo crictl info | grep -iE 'sandboxImage|runtimeType' | head -3
 ```
 
-On the node: the images the runtime holds. The runtime caches by digest, so a mutable tag that moved is still the old image on nodes that already pulled it.
+On the node: the images the runtime holds. The runtime caches by digest, so with `imagePullPolicy: IfNotPresent` a mutable tag that moved is still the old image on nodes that already pulled it.
 
 ### Volumes and PVCs
 
@@ -3289,7 +3289,7 @@ Who the API server thinks you are, with groups. Needs kubectl 1.28 or later (**k
 kubectl get rolebindings,clusterrolebindings -A -o wide | grep -w SA
 ```
 
-Bindings that name the service account. No line means it has no extra rights.
+Bindings that name the service account. No line means no direct binding; it may still get rights through a group. Run `kubectl auth can-i --list` as that account for the full picture.
 
 ```text
 exceeded quota: q, requested: pods=1, used: pods=50, limited: pods=50
@@ -3383,7 +3383,7 @@ The same check without kubeadm, for one file. A cluster whose certificates expir
 kubectl config view --raw --minify -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d | openssl x509 -noout -enddate
 ```
 
-When your own client certificate in the kubeconfig expires. The output holds a public certificate only, not the key.
+When your own client certificate in the kubeconfig expires. The output holds a public certificate only, not the key. This works only for embedded data: for a `client-certificate` file path run `openssl x509` on that file; token and exec users have no client certificate.
 
 ```sh danger
 sudo kubeadm certs renew all
@@ -4237,13 +4237,13 @@ Goroutines grouped by identical stack: the count at the start of each group, the
 curl -s 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=2' | head -60
 ```
 
-Every goroutine with its full stack and state, in the same shape as a crash dump: `goroutine 98 [running]:`, `[chan receive]`, `[select (no cases)]`, `[IO wait]`, `[sync.Mutex.Lock]`. A goroutine blocked a long time shows it, as in `[chan receive, 5 minutes]`.
+Every goroutine with its full stack and state, in the same shape as a crash dump: `goroutine 98 [running]:`, `[chan receive]`, `[select (no cases)]`, `[IO wait]`, `[sync.Mutex.Lock]`. A goroutine blocked a long time shows it, as in `[chan receive, 5 minutes]`. With many goroutines it pauses the program briefly.
 
 ```sh
 go tool pprof -top -nodecount=15 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
 ```
 
-A 30-second CPU profile, ranked: **flat** is time in the function itself, **cum** includes what it calls. The sample total tells you how busy it was. `runtime.asyncPreempt` near the top is just a busy loop. Add `-http=:8081` for the flame graph.
+A 30-second CPU profile, ranked: **flat** is time in the function itself, **cum** includes what it calls. The sample total tells you how busy it was. `runtime.asyncPreempt` near the top is just a busy loop. Add `-http=:8081` for the flame graph. Profiling costs a few percent of CPU for the 30 seconds.
 
 ```sh
 go tool pprof -top -sample_index=inuse_space -nodecount=15 http://127.0.0.1:6060/debug/pprof/heap
@@ -4472,7 +4472,7 @@ Plans a move to the first record at or after that time. An empty partition falls
 kafka-consumer-groups.sh --bootstrap-server BROKER --group GROUPNAME --topic TOPIC --reset-offsets --to-earliest --execute
 ```
 
-Replays the whole topic for that group. Everything still on disk is processed again, so consumers must tolerate duplicates. Save each partition's **CURRENT-OFFSET** from `--describe` first: to undo, reset each partition back with `--to-offset N`.
+Replays the whole topic for that group. Everything still on disk is processed again, so consumers must tolerate duplicates. Save each partition's **CURRENT-OFFSET** from `--describe` first: to undo, reset each partition back with `--topic TOPIC:PARTITION --to-offset N` (partitions after the colon, comma-separated), or use `--from-file` with a CSV.
 
 ```sh danger
 kafka-consumer-groups.sh --bootstrap-server BROKER --group GROUPNAME --topic TOPIC --reset-offsets --to-latest --execute
@@ -5172,7 +5172,7 @@ Per-table autovacuum overrides, including `autovacuum_enabled=false` left over f
 VACUUM (VERBOSE, ANALYZE) TABLENAME;
 ```
 
-Vacuums and analyzes one table in your session without blocking reads or writes. The verbose output shows pages removed, dead rows "not yet removable", and the cutoff. It returns space to the OS only from the end of the file.
+Vacuums and analyzes one table in your session without blocking reads or writes, except that the final truncation briefly takes ACCESS EXCLUSIVE; `VACUUM (TRUNCATE false, VERBOSE, ANALYZE)` avoids it. The verbose output shows pages removed, dead rows "not yet removable", and the cutoff. It returns space to the OS only from the end of the file.
 
 ```text
 LOG:  automatic vacuum of table "app.public.av1": index scans: 0
@@ -5201,7 +5201,7 @@ SELECT index_size, avg_leaf_density, leaf_fragmentation
 FROM pgstatindex('INDEXNAME');
 ```
 
-A btree's health. **avg_leaf_density** far below 90 (the fill factor default) with a large `index_size` is a bloated index; **leaf_fragmentation** above about 30 hurts range scans. Fix with `REINDEX INDEX CONCURRENTLY INDEXNAME;`, which needs the extra disk space of a second copy.
+A btree's health. It reads the whole index, so it is slow on a large one. **avg_leaf_density** far below 90 (the fill factor default) with a large `index_size` is a bloated index; **leaf_fragmentation** above about 30 hurts range scans. Fix with `REINDEX INDEX CONCURRENTLY INDEXNAME;`, which needs the extra disk space of a second copy.
 
 ```sql danger
 VACUUM FULL TABLENAME;
@@ -5248,7 +5248,13 @@ Vacuum hit `vacuum_failsafe_age` (default 1.6 billion) and now skips index clean
 ERROR:  database is not accepting commands that assign new transaction IDs to avoid wraparound data loss in database "DB"
 ```
 
-Writes are refused a few million ids before wraparound. Fix: stop writers, remove prepared transactions and stale slots, then run `VACUUM` in that database; if even that is refused, start in single-user mode with `postgres --single -D DATADIR DB`. Reads still work. Wording differs slightly before PostgreSQL 17.
+Writes are refused a few million ids before wraparound. Fix: stop writers, remove prepared transactions and stale slots, then run `VACUUM` in that database; if even that is refused, start in single-user mode (next entry). Reads still work. Wording differs slightly before PostgreSQL 17.
+
+```sh danger
+postgres --single -D DATADIR DB
+```
+
+Single-user mode for the wraparound fix above: stop the server first and run it as the `postgres` user. Type `VACUUM;` at the prompt, then press Ctrl-D. It turns off the wraparound safeguards, so use it only when `VACUUM` itself is refused.
 
 ### Slow queries
 
@@ -5318,7 +5324,7 @@ SET auto_explain.log_analyze = on;
 SET auto_explain.log_buffers = on;
 ```
 
-Logs the plan of any statement over 500 ms in this session, with actual rows and buffers, so you catch the plan of a slow query as the app really runs it (superuser needed for `LOAD`). For all sessions put `auto_explain` in `shared_preload_libraries`. `log_analyze` adds timing overhead.
+Logs the plan of any statement over 500 ms in this session, with actual rows and buffers, so you catch the plan of a slow query as the app really runs it (superuser needed for `LOAD`). For all sessions put `auto_explain` in `shared_preload_libraries`. `log_analyze` adds timing overhead. The logged query text includes literal values.
 
 ```text
 LOG:  duration: 6.210 ms  plan:
@@ -5341,7 +5347,7 @@ Big tables read by sequential scans are index candidates. `seq_tup_read` is the 
 psql -h HOST -d DB -c "ALTER SYSTEM SET log_min_duration_statement = '1s'" -c "SELECT pg_reload_conf()"
 ```
 
-Logs every statement slower than one second, with its duration, from now on (changes `postgresql.auto.conf`; undo with `ALTER SYSTEM RESET log_min_duration_statement`). Cheaper than `auto_explain` when you only need the text.
+Logs every statement slower than one second, with its duration, from now on (changes `postgresql.auto.conf`; undo with `ALTER SYSTEM RESET log_min_duration_statement`). Cheaper than `auto_explain` when you only need the text. Logged statements include literal values, so the log may hold secrets.
 
 ### Indexes
 
@@ -5350,7 +5356,7 @@ SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl, i.indisvalid,
 FROM pg_index i WHERE NOT i.indisvalid;
 ```
 
-Invalid indexes. A failed or cancelled `CREATE INDEX CONCURRENTLY` leaves one behind: it is maintained on every write but never used. Drop it with `DROP INDEX CONCURRENTLY` and retry, after fixing the cause (often duplicate data for a unique index).
+Invalid indexes. A failed or cancelled `CREATE INDEX CONCURRENTLY` leaves one behind: it is maintained on every write but never used. Drop it with `DROP INDEX CONCURRENTLY` and retry, after fixing the cause (often duplicate data for a unique index). A concurrent build still in progress also shows here: check `pg_stat_progress_create_index` before dropping.
 
 ```text
 ERROR:  could not create unique index "ix_k_uniq"
@@ -5547,7 +5553,7 @@ On the publisher, for a logical slot lost to `max_slot_wal_keep_size`. PostgreSQ
 SELECT pg_wal_replay_pause();
 ```
 
-On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, `pg_get_wal_replay_pause_state()` says `paused` and the lag grows. Always resume afterwards.
+On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, `pg_get_wal_replay_pause_state()` says `paused` and the lag grows. Always resume afterwards: a long pause fills `pg_wal` on the standby.
 
 ```sql changes
 SELECT pg_wal_replay_resume();
@@ -5607,10 +5613,15 @@ Wipes the member's data directory and rebuilds it from the leader. Use it for a 
 
 ```sh changes
 patronictl -c FILE pause
+```
+
+Stops automatic failover (maintenance mode) so you can restart or work on nodes by hand. Do not leave a cluster paused: a primary failure then goes unnoticed.
+
+```sh changes
 patronictl -c FILE resume
 ```
 
-Pause stops automatic failover (maintenance mode) so you can restart or work on nodes by hand; resume restores it. Do not leave a cluster paused: a primary failure then goes unnoticed.
+Restores automatic failover after a pause.
 
 ```text
 INFO: Lock owner: node1; I am node2
@@ -5644,7 +5655,7 @@ A logical, compressed dump in custom format, then its table of contents. A custo
 pg_restore -h HOST -U DBUSER -d DB -j 4 --no-owner --exit-on-error FILE
 ```
 
-Restores into an existing, empty database in 4 parallel jobs (each job opens a connection; also builds indexes in parallel). `--exit-on-error` stops at the first failure instead of finishing with "errors ignored on restore: N". Add `--clean --if-exists` to replace existing objects. `-j` works on custom and directory formats, not plain SQL.
+Restores into an existing, empty database in 4 parallel jobs (each job opens a connection; also builds indexes in parallel). `--exit-on-error` stops at the first failure instead of finishing with "errors ignored on restore: N". `--no-owner` skips the original owners, so the objects belong to `DBUSER`. Add `--clean --if-exists` to replace existing objects: this drops the existing tables and their data first. `-j` works on custom and directory formats, not plain SQL.
 
 ```text
 pg_restore: error: could not execute query: ERROR:  role "ghost" does not exist
@@ -5858,7 +5869,7 @@ The backend died (look for "terminated by signal 9" in the server log and the OO
 duplicate key value violates unique constraint "..._pkey"
 ```
 
-Right after a restore: the sequence is behind the data. `SELECT setval(pg_get_serial_sequence('TABLENAME', 'id'), max(id)) FROM TABLENAME;`
+Right after a restore: the sequence is behind the data. Run this after writers have stopped: `SELECT setval(pg_get_serial_sequence('TABLENAME', 'id'), max(id)) FROM TABLENAME;`
 
 ```text
 WARNING:  page verification failed, calculated checksum 49085 but expected 28645
@@ -6001,7 +6012,7 @@ SELECT ROUND(100 * (SELECT variable_value FROM performance_schema.global_status 
  / (SELECT variable_value FROM performance_schema.global_status WHERE variable_name = 'Connections'), 2) AS pct_new_threads;
 ```
 
-The share of connections that needed a new thread instead of a cached one. Above about 10 percent, raise `thread_cache_size` (9 on a default MySQL, 151 on MariaDB).
+The share of connections that needed a new thread instead of a cached one. Above about 10 percent, raise `thread_cache_size` (9 on a default MySQL, 256 on MariaDB).
 
 ```sql mariadb10.11+
 SELECT ROUND(100 * (SELECT variable_value FROM information_schema.global_status WHERE variable_name = 'Threads_created')
@@ -6391,11 +6402,11 @@ SHOW VARIABLES LIKE 'binlog_expire_logs_seconds';
 
 How long binlogs are kept. The default is 2592000 (30 days) on MySQL and 0 (never) on MariaDB, though the Debian and Ubuntu packages and the Docker image set 10 days in `50-server.cnf`; `expire_logs_days` is the deprecated older setting.
 
-```sql changes
+```sql danger
 SET GLOBAL binlog_expire_logs_seconds = 259200;
 ```
 
-Keeps 3 days of binlogs and purges older ones on the next rotation. Keep it longer than the longest replica outage or backup interval you must survive.
+Keeps 3 days of binlogs and purges older ones on the next rotation. Purged files cannot be recovered, so check the slowest replica first. Keep it longer than the longest replica outage or backup interval you must survive.
 
 ### Group Replication
 
@@ -6462,13 +6473,13 @@ A consistent dump of InnoDB tables without locking them. It prompts for the pass
 mysqldump --single-transaction --source-data=2 --all-databases -u DBUSER -p > FILE
 ```
 
-Writes the binlog file and position as a comment, to start a replica from this dump. `--master-data` is the old name: 8.4 still accepts it with a deprecation warning.
+Writes the binlog file and position as a comment, to start a replica from this dump. At the start it takes a brief global read lock (`FLUSH TABLES WITH READ LOCK`): it waits for running queries to finish and stalls new ones meanwhile. `--master-data` is the old name: 8.4 still accepts it with a deprecation warning.
 
 ```sh mariadb10.11+
 mariadb-dump --single-transaction --master-data=2 --gtid --all-databases -u DBUSER -p > FILE
 ```
 
-MariaDB's tool. The dump carries `CHANGE MASTER TO MASTER_USE_GTID=slave_pos` and the `gtid_slave_pos` to start from. `--source-data` and `--set-gtid-purged` are rejected here.
+MariaDB's tool. The dump carries `CHANGE MASTER TO MASTER_USE_GTID=slave_pos` and the `gtid_slave_pos` to start from. It takes no global read lock: MariaDB reads the binlog position from the snapshot. `--source-data` and `--set-gtid-purged` are rejected here.
 
 ```text
 mysqlpump is deprecated and will be removed in a future version. Use mysqldump instead.
@@ -7275,10 +7286,10 @@ sqlite3 FILE "PRAGMA wal_checkpoint(PASSIVE);"
 Copies WAL frames into the database file without blocking anyone. It prints three numbers: **busy** (1 if it could not finish), the frames in the WAL, and the frames copied. `0|0|0` is an empty WAL. Frames copied below the total means readers still need old data.
 
 ```sh changes
-sqlite3 FILE "PRAGMA wal_checkpoint(TRUNCATE);"
+sqlite3 FILE ".timeout 5000" "PRAGMA wal_checkpoint(TRUNCATE);"
 ```
 
-Waits for writers and readers (up to `busy_timeout`), copies everything and shrinks the `-wal` file to zero. Output `1|268|0` means it was blocked: a long read transaction holds an old snapshot, so the WAL cannot be reset and keeps growing. Find that process with `fuser -v FILE`. `RESTART` and `FULL` also exist.
+Waits for writers and readers (up to 5 seconds with `.timeout 5000`; the shell default is 0), stalls new writers while it waits, copies everything and shrinks the `-wal` file to zero. Output `1|268|0` means it was blocked: a long read transaction holds an old snapshot, so the WAL cannot be reset and keeps growing. Find that process with `fuser -v FILE`. `RESTART` and `FULL` also exist.
 
 ```text
 -rw-r--r-- 1 root root 1104192 Nov 20 16:19 app.db-wal
@@ -7391,7 +7402,7 @@ All schema and data as SQL, restorable with `sqlite3 NEW.db < FILE.sql`. Slower 
 
 ## Redis
 
-One command thread serves everyone, so a single slow command stalls every client. The commands work on Valkey too: use `valkey-cli` for `redis-cli`, and `valkey-sentinel` for `redis-sentinel`.
+One command thread serves everyone, so a single slow command stalls every client. The commands work on Valkey too: use `valkey-cli` for `redis-cli`, `valkey-sentinel` for `redis-sentinel`, and `valkey-check-aof` for `redis-check-aof`.
 
 ### Connect and first look
 
@@ -7946,7 +7957,7 @@ redis-cli ACL WHOAMI
 redis-cli ACL LIST
 ```
 
-`ACL WHOAMI` is the user of this connection. `ACL LIST` shows each user's rules, such as `on #hash ~app:* -@all +get`: key patterns after `~` and commands after `+` and `-`. Passwords show as a hash, never in clear.
+`ACL WHOAMI` is the user of this connection. `ACL LIST` shows each user's rules, such as `on #hash ~app:* -@all +get`: key patterns after `~` and commands after `+` and `-`. Passwords show as a hash, never in clear. The hashes are unsalted SHA-256, so do not paste the output.
 
 ```sh
 redis-cli ACL LOG 10
@@ -7964,7 +7975,7 @@ Clears the log, so new failures stand out after you fix a rule. `acllog-max-len`
 redis-cli ACL GETUSER DBUSER
 ```
 
-One user's flags (`on`, `nopass`), password hashes, command rules, `keys` and `channels` patterns. A user with `-@all +get` can read, but `CONFIG GET` and `ACL WHOAMI` fail with NOPERM. The `default` user with `nopass` means no login is needed.
+One user's flags (`on`, `nopass`), password hashes (unsalted SHA-256: do not paste the output), command rules, `keys` and `channels` patterns. A user with `-@all +get` can read, but `CONFIG GET` and `ACL WHOAMI` fail with NOPERM. The `default` user with `nopass` means no login is needed.
 
 ### TLS
 
@@ -8260,7 +8271,7 @@ The latest slow queries as short rows: collection, milliseconds, plan, documents
 db.COLLECTION.find({g: 5}).explain("executionStats")
 ```
 
-**winningPlan** `COLLSCAN` reads every document; `IXSCAN` uses an index. Compare **totalDocsExamined** with **nReturned**: 60000 against 600 is a scan for 1 percent of the data. **executionTimeMillis** and **totalKeysExamined** show the cost.
+**winningPlan** `COLLSCAN` reads every document; `IXSCAN` uses an index. Compare **totalDocsExamined** with **nReturned**: 60000 against 600 is a scan for 1 percent of the data. **executionTimeMillis** and **totalKeysExamined** show the cost. This runs the query, so a `COLLSCAN` loads the server.
 
 ```js changes
 db.COLLECTION.createIndex({g: 1, i: -1})
@@ -8354,11 +8365,11 @@ Data, documents and chunks per shard, with the share of each. A shard far above 
 
 ### Backups
 
-```sh
+```sh changes
 mongodump --uri "mongodb://DBUSER@HOST:27017/?authSource=admin&replicaSet=REPLSET&readPreference=secondary" --oplog --gzip --archive=FILE
 ```
 
-A consistent dump of the whole replica set from a secondary; `--oplog` adds the writes made while it ran. With a user and no password it prompts, so nothing is on the command line. `--oplog` fails with `--db`: `bad option: --oplog mode only supported on full dumps`.
+A consistent dump of the whole replica set from a secondary; `--oplog` adds the writes made while it ran. With a user and no password it prompts, so nothing is on the command line. `FILE` is overwritten and every document is read. `--oplog` fails with `--db`: `bad option: --oplog mode only supported on full dumps`.
 
 ```sh danger
 mongorestore --uri "mongodb://DBUSER@HOST:27017/?authSource=admin" --gzip --archive=FILE --oplogReplay
@@ -8410,11 +8421,11 @@ The cluster turns yellow or red when shards cannot be placed, and red is real da
 
 ### Elasticsearch and OpenSearch: connecting safely
 
-```sh
+```sh changes
 (umask 077; read -rsp 'Password: ' PW; printf 'machine HOST\nlogin elastic\npassword %s\n' "$PW" > ~/.es.netrc; unset PW)
 ```
 
-Never put a password in `-u user:pass`: it shows in `ps` and in shell history. This prompts for it and writes `~/.es.netrc` readable by you only. `machine` must match the host name in the URL. `printf` is a shell builtin, so the password never appears in a process list. Use `login admin` for an OpenSearch demo install. Delete the file when finished.
+Never put a password in `-u user:pass`: it shows in `ps` and in shell history. This prompts for it and writes `~/.es.netrc` readable by you only. `machine` must match the host name in the URL. `printf` is a shell builtin, so the password never appears in a process list. Use `login admin` for an OpenSearch demo install. Run it in bash: `read -rsp` fails on dash. An existing `~/.es.netrc` is replaced. Delete the file when finished.
 
 ```sh
 curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://HOST:9200/'
@@ -8464,7 +8475,7 @@ Lists only the red indices. Change `red` to `yellow` for the replica gaps. A red
 curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://HOST:9200/_cat/shards?h=index,shard,prirep,state,unassigned.reason&s=state' | grep UNASSIGNED
 ```
 
-Every unassigned shard and why, such as `INDEX_CREATED` (a replica with nowhere to go on a single node), `NODE_LEFT`, `ALLOCATION_FAILED` or `CLUSTER_RECOVERED`. **prirep** `p` is a primary and `r` a replica. A `p` row here is the red one.
+Every unassigned shard and why, such as `INDEX_CREATED` (a replica with nowhere to go on a single node), `NODE_LEFT`, `ALLOCATION_FAILED` or `CLUSTER_RECOVERED`. **prirep** `p` is a primary and `r` a replica. A `p` row here is the red one. The full shard list is large on big clusters.
 
 ```sh
 curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://HOST:9200/_cluster/allocation/explain?pretty'

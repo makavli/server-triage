@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-vvyOjcZVn7k2QW9Hez32tghx7j1DTo0wWvgfi7/JgrA='; style-src 'sha256-zFpBWP/sBovPMUWXhMxrJtDjAJYBpNKyRzseeARAYh0='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5GvMiHf/6JQCSsy5vrRYxbDyBcyx92mgRMrWfiUtiHA='; style-src 'sha256-mOD2qAVIdRR44KdrfBQ85zfZy7Ot6sayzAEKGv1Kq7Y='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
 <title>Server Triage Sheet</title>
 <meta name="description" content="Commands and error meanings for a broken host, service or database.">
 <meta name="color-scheme" content="light dark">
@@ -57,7 +57,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.55 
 ::highlight(hit) { background-color: var(--hit); color: var(--ink); }
 .wrap { max-width: 74rem; margin-inline: auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 a { color: var(--accent); text-underline-offset: .18em; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible, label.btn:has(+ input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
 .skip { position: absolute; left: 16px; top: -4rem; z-index: 30; background: var(--ink); color: var(--bg); padding: .5rem .8rem; border-radius: 6px; text-decoration: none; }
 .skip:focus-visible { top: .75rem; }
@@ -76,7 +76,8 @@ input, select, textarea { font: 400 .9375rem/1.4 var(--f-body); color: var(--ink
 textarea { font-family: var(--f-mono); font-size: .875rem; resize: vertical; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input:hover, select:hover, textarea:hover { border-color: var(--muted); }
-[aria-invalid] { border-color: var(--err-fg); }
+[aria-invalid] { border-color: var(--err-fg); border-style: dashed; }
+.f:has([aria-invalid]) .f-name::after { content: " (not valid)"; color: var(--err-fg); font-weight: 600; }
 input[type="checkbox"], input[type="radio"] { width: 1.05rem; height: 1.05rem; margin: 0; flex: none; }
 .f { display: grid; gap: .25rem; min-width: 0; }
 .f-name { font-size: .8125rem; font-weight: 600; color: var(--muted); }
@@ -85,6 +86,7 @@ input[type="checkbox"], input[type="radio"] { width: 1.05rem; height: 1.05rem; m
 .btns { display: flex; flex-wrap: wrap; gap: .5rem; }
 .note-line { color: var(--muted); font-size: .875rem; margin: 0; max-width: 60ch; }
 .note-line.warn { color: var(--warn-fg); }
+.lost { margin: .25rem 0 .5rem; padding-left: 1.25rem; max-height: 12rem; overflow: auto; font-size: .875rem; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* Header */
 .top { padding-block: 2.5rem 1.25rem; }
@@ -190,7 +192,7 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .937
 footer .wrap { padding-block: 1.25rem 2rem; display: grid; gap: .4rem; }
 footer p { margin: 0; max-width: 70ch; }
 
-.toast { position: fixed; left: 50%; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, .5rem); opacity: 0; transition: opacity .15s ease, transform .15s ease; background: var(--ink); color: var(--bg); padding: .45rem .9rem; border-radius: 6px; font-size: .9375rem; pointer-events: none; z-index: 20; max-width: calc(100vw - 32px); }
+.toast { position: fixed; inset: auto; margin: 0; border: 0; overflow: visible; left: 50%; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, .5rem); opacity: 0; transition: opacity .15s ease, transform .15s ease; background: var(--ink); color: var(--bg); padding: .45rem .9rem; border-radius: 6px; font-size: .9375rem; pointer-events: none; z-index: 20; max-width: calc(100vw - 32px); }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } .setup:popover-open { animation: none; } }
 
@@ -365,6 +367,12 @@ footer p { margin: 0; max-width: 70ch; }
         <label class="btn" for="import">Import</label><input class="sr" type="file" id="import" accept=".json,application/json">
         <button class="btn danger" type="button" id="wipe">Delete my data</button>
       </div>
+      <p class="note-line">An export holds your values and your notes: share it only where they may be read.</p>
+      <div id="lost" hidden>
+        <p class="note-line">Pins and notes for entries that changed since, which the sheet no longer shows:</p>
+        <ul id="lost-list" class="lost"></ul>
+        <div class="btns"><button class="btn danger" type="button" id="lost-del">Delete these</button></div>
+      </div>
     </div>
   </div>
 </div>
@@ -440,7 +448,7 @@ Name or service not known</code><div class="m"><p>DNS: a typo, a wrong search do
 Failed to allocate directory watch: Too many open files</code><div class="m"><p>Not a full disk: the inotify limits. The first is <code>fs.inotify.max_user_watches</code>, the second <code>fs.inotify.max_user_instances</code>, both counted per user. <b>Check</b> them with <code>sysctl fs.inotify</code>; many containers or editors on one host exhaust the instances.</p></div></div>
 <div class="r" id="error-decoder-37a145" data-in="Error decoder Limits and resources" data-tags="changes"><code class="k">sudo sysctl -w fs.inotify.max_user_watches=524288</code><div class="m"><p>Raises the watch limit until reboot, at a few hundred bytes of kernel memory per watch. To keep it, write the same key into a file under <code>/etc/sysctl.d/</code> and run <code>sudo sysctl --system</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="error-decoder-ed0463" data-in="Error decoder Limits and resources"><code class="k">Cannot allocate memory</code><div class="m"><p>ENOMEM. A fork or mmap was refused: a cgroup or <code>ulimit -v</code> limit, strict overcommit (<code>vm.overcommit_memory=2</code>, compare <b>CommitLimit</b> and <b>Committed_AS</b> in <code>/proc/meminfo</code>), or too many mappings. Elasticsearch and similar tools need <code>vm.max_map_count</code> raised from its default of 65530.</p></div></div>
-<div class="r x" id="error-decoder-c60818" data-in="Error decoder Limits and resources"><code class="k">Resource temporarily unavailable</code><div class="m"><p>EAGAIN. On a non-blocking socket read or accept it is normal flow control, not a fault. From <code>fork</code> or <code>pthread_create</code> it is the process or thread limit (see the fork entry). From <code>flock -n</code> it means another process holds the lock: <code>lslocks</code>.</p></div></div>
+<div class="r x" id="error-decoder-c60818" data-in="Error decoder Limits and resources"><code class="k">Resource temporarily unavailable</code><div class="m"><p>EAGAIN. On a non-blocking socket read or accept it is normal flow control, not a fault. From <code>fork</code> or <code>pthread_create</code> it is the process or thread limit (see the fork entry). <code>flock -n</code> exits 1 silently when another process holds the lock (<code>lslocks</code>); a program that hits a held lock may print this message.</p></div></div>
 <div class="r x" id="error-decoder-17ed1d" data-in="Error decoder Limits and resources"><code class="k">fork: Resource temporarily unavailable</code><div class="m"><p>Process or thread limit: <code>ulimit -u</code>, the cgroup's <code>pids.max</code>, <code>kernel.pid_max</code>. Often a thread leak.</p></div></div>
 </div></div>
 <div class="grp"><h3>Permissions and security modules</h3><div class="t">
@@ -507,7 +515,7 @@ Memory cgroup out of memory: Killed process 4242 (java) total-vm:12582912kB, ano
 <div class="r" id="services-and-logs-0242b8" data-in="Services and logs systemd timers and cron"><code class="k">systemctl list-timers --all</code><div class="m"><p><b>NEXT</b> and <b>LEFT</b> are the next run, <b>LAST</b> and <b>PASSED</b> the previous one, <b>ACTIVATES</b> the service that does the work. A <code>-</code> under NEXT means no future run: the timer is inactive or its calendar never matches. The job's output is in <code>journalctl -u APP.service</code>.</p></div></div>
 <div class="r" id="services-and-logs-4abe64" data-in="Services and logs systemd timers and cron"><code class="k">systemctl show <var data-p="APP">APP</var>.timer -p NextElapseUSecRealtime,LastTriggerUSec,Persistent,RandomizedDelayUSec,AccuracyUSec</code><div class="m"><p>When it fires next and when it last did. <b>Persistent=no</b> means a run missed while the host was off is skipped, not made up at boot. <b>RandomizedDelayUSec</b> and <b>AccuracyUSec</b> (default 1 minute) move a run later than the clock time.</p></div></div>
 <div class="r" id="services-and-logs-963c3c" data-in="Services and logs systemd timers and cron"><code class="k">systemd-analyze calendar 'Mon..Fri *-*-* 02:30'</code><div class="m"><p>Checks an <code>OnCalendar=</code> expression and prints its normalised form and the next run. A typo is rejected here, not at 2 a.m. Timestamps are in the host's time zone unless the expression ends in <code>UTC</code>.</p></div></div>
-<div class="r" id="services-and-logs-7a2661" data-in="Services and logs systemd timers and cron"><code class="k">sudo cat /etc/crontab /etc/cron.d/*</code><div class="m"><p>System crontabs carry a sixth field, the user (<code>* * * * * root command</code>); a user's <code>crontab -e</code> has none, and a missing field is the commonest silent failure. cron's PATH is short, and a bare <code>%</code> ends the command: write <code>\%</code>. Debian cron ignores <code>/etc/cron.d</code> files with a dot in the name.</p></div></div>
+<div class="r" id="services-and-logs-7a2661" data-in="Services and logs systemd timers and cron"><code class="k">sudo cat /etc/crontab /etc/cron.d/*</code><div class="m"><p>System crontabs carry a sixth field, the user (<code>* * * * * root command</code>); a user's <code>crontab -e</code> has none, and a missing field is the commonest silent failure. cron's PATH is short, and a bare <code>%</code> ends the command: write <code>\%</code>. Debian cron ignores <code>/etc/cron.d</code> files with a dot in the name. The output may show passwords in command lines.</p></div></div>
 <div class="r" id="services-and-logs-5a9eac" data-in="Services and logs systemd timers and cron" data-tags="deb"><code class="k">run-parts --test /etc/cron.daily</code><div class="m"><p>Lists the scripts <code>cron.daily</code> would run. A script that is not executable, or whose name has a dot such as <code>backup.sh</code>, is skipped without a word.</p><p class="tags"><span class="tag t-deb">Debian, Ubuntu</span></p></div></div>
 <div class="r" id="services-and-logs-1cb556" data-in="Services and logs systemd timers and cron" data-tags="deb"><code class="k">sudo journalctl -u cron --since today</code><div class="m"><p>One line per start, <code>CRON[PID]: (user) CMD (command)</code>. A job that starts here but does nothing failed inside its own command: cron does not log its exit code.</p><p class="tags"><span class="tag t-deb">Debian, Ubuntu</span></p></div></div>
 <div class="r" id="services-and-logs-ee5840" data-in="Services and logs systemd timers and cron" data-tags="rhel"><code class="k">sudo journalctl -u crond --since today</code><div class="m"><p>The cronie log: starts, and errors such as a bad crontab line. The job's own output goes by mail to the user, or to nowhere when no mail agent is installed.</p><p class="tags"><span class="tag t-rhel">RHEL family</span></p></div></div>
@@ -586,10 +594,10 @@ sudo perf report --stdio | head -40</code><div class="m"><p>Samples the stacks 9
 <div class="grp"><h3>Disk space</h3><div class="t">
 <div class="r" id="cpu-memory-disk-files-faa1b9" data-in="CPU, memory, disk, files Disk space"><code class="k">df -hT</code><div class="m"><p>Space per filesystem, with its type.</p></div></div>
 <div class="r" id="cpu-memory-disk-files-a6e26c" data-in="CPU, memory, disk, files Disk space"><code class="k">df -i</code><div class="m"><p>Inodes. 100% used with free space left means millions of small files: sessions, a cache, a mail queue.</p></div></div>
-<div class="r" id="cpu-memory-disk-files-504f5f" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo ionice -c3 du -xhd1 / 2&gt;/dev/null | sort -h | tail</code><div class="m"><p>Biggest directories; <code>-x</code> stays on one filesystem. As root so no directory is skipped, at idle I/O priority so it does not starve the disk. Repeat one level down.</p></div></div>
-<div class="r" id="cpu-memory-disk-files-525988" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo find / -xdev -type f -size +500M -printf '%s %p\n' 2&gt;/dev/null | sort -rn | head</code><div class="m"><p>The biggest single files on the root filesystem, in bytes. Repeat with another mount point for other filesystems. Add <code>-mtime -1</code> to see only what grew today.</p></div></div>
+<div class="r" id="cpu-memory-disk-files-504f5f" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo ionice -c3 du -xhd1 / 2&gt;/dev/null | sort -h | tail</code><div class="m"><p>Biggest directories; <code>-x</code> stays on one filesystem. As root so no directory is skipped, at idle I/O priority so it does not starve the disk. That holds only where the disk's scheduler honours priorities (<code>cat /sys/block/DISK/queue/scheduler</code>): <code>bfq</code> does, <code>none</code>, common on NVMe, does not. Repeat one level down.</p></div></div>
+<div class="r" id="cpu-memory-disk-files-d13cf0" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo ionice -c3 find / -xdev -type f -size +500M -printf '%s %p\n' 2&gt;/dev/null | sort -rn | head</code><div class="m"><p>The biggest single files on the root filesystem, in bytes. Repeat with another mount point for other filesystems. Add <code>-mtime -1</code> to see only what grew today. It walks the whole tree, so it runs at idle I/O priority.</p></div></div>
 <div class="r" id="cpu-memory-disk-files-f1e2b4" data-in="CPU, memory, disk, files Disk space"><code class="k">for d in /var/*/; do echo &quot;$(sudo find &quot;$d&quot; -xdev 2&gt;/dev/null | wc -l) $d&quot;; done | sort -rn | head</code><div class="m"><p>Entries per directory: where the inodes went when <code>df -i</code> says full. Change <code>/var</code> to the filesystem concerned. It walks the tree, so it takes a while on a big one.</p></div></div>
-<div class="r" id="cpu-memory-disk-files-207d3a" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo lsof +L1</code><div class="m"><p>Deleted files still held open. When <code>df</code> says full and <code>du</code> cannot find it, it is usually these; otherwise files hidden under a mount point (<code>mount --bind / /mnt</code> and run <code>du</code> on <code>/mnt</code>). Restart the holder. For a log only, truncate it with <code>sudo truncate -s 0 /proc/PID/fd/N</code>, after copying it to another filesystem if you need it. Never truncate a live database file or WAL: the process still uses it. A writer that does not append keeps its offset, so the file comes back sparse.</p></div></div>
+<div class="r" id="cpu-memory-disk-files-207d3a" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo lsof +L1</code><div class="m"><p>Deleted files still held open. When <code>df</code> says full and <code>du</code> cannot find it, it is usually these; otherwise files hidden under a mount point (<code>mount --bind / /mnt</code> and run <code>du</code> on <code>/mnt</code>). <code>lsof</code> can hang on a dead NFS mount. Restart the holder. For a log only, truncate it with <code>sudo truncate -s 0 /proc/PID/fd/N</code>, after copying it to another filesystem if you need it. Never truncate a live database file or WAL: the process still uses it. A writer that does not append keeps its offset, so the file comes back sparse.</p></div></div>
 <div class="r" id="cpu-memory-disk-files-52df10" data-in="CPU, memory, disk, files Disk space"><code class="k">sudo find /proc/[0-9]*/fd -lname '*(deleted)' -printf '%p -&gt; %l\n' 2&gt;/dev/null | head</code><div class="m"><p>The same without lsof: the path shows the <b>PID</b> and the descriptor number. Processes that share a descriptor, such as fork children, each list it.</p></div></div>
 </div></div>
 <div class="grp"><h3>Files and descriptors</h3><div class="t">
@@ -660,7 +668,7 @@ Dependency failed for ... /data.</code><div class="m"><p>An <code>/etc/fstab</co
 <div class="grp"><h3>NFS</h3><div class="t">
 <div class="r" id="storage-and-filesystems-34b33a" data-in="Storage and filesystems NFS"><code class="k">nfsstat -m</code><div class="m"><p>Every NFS mount on a client with its real options: <b>vers</b>, <b>proto</b>, <b>hard</b> or <b>soft</b>, <b>timeo</b>, <b>retrans</b>, <b>sec</b> and the server address. Package <code>nfs-common</code> on Debian, <code>nfs-utils</code> on RHEL. A mount without <code>hard</code> can return IO errors and corrupt data.</p></div></div>
 <div class="r" id="storage-and-filesystems-0618d6" data-in="Storage and filesystems NFS"><code class="k">nfsiostat 1 3 <var data-p="MNT">MNT</var></code><div class="m"><p>Per-mount NFS rates: operations a second, kB a second, retransmissions and <b>avg RTT</b> in milliseconds. A high RTT is the network or an overloaded server; <b>retrans</b> above 0 means lost or slow replies.</p></div></div>
-<div class="r" id="storage-and-filesystems-504348" data-in="Storage and filesystems NFS"><code class="k">rpcinfo -p <var data-p="HOST">HOST</var></code><div class="m"><p>The RPC services the server has registered. NFSv3 needs <code>portmapper</code>, <code>mountd</code> and <code>nfs</code>; NFSv4 needs only TCP port 2049. &quot;Connection refused&quot; or a timeout means the firewall or rpcbind is down.</p></div></div>
+<div class="r" id="storage-and-filesystems-504348" data-in="Storage and filesystems NFS"><code class="k">rpcinfo -p <var data-p="HOST">HOST</var></code><div class="m"><p>The RPC services the server has registered. NFSv3 needs <code>portmapper</code>, <code>mountd</code> and <code>nfs</code>, and for locking <code>nlockmgr</code> and <code>status</code>; NFSv4 needs only TCP port 2049. &quot;Connection refused&quot; or a timeout means the firewall or rpcbind is down.</p></div></div>
 <div class="r" id="storage-and-filesystems-defb5e" data-in="Storage and filesystems NFS"><code class="k">showmount -e <var data-p="HOST">HOST</var></code><div class="m"><p>The server's export list and who may mount each. It speaks NFSv3 and can fail against an NFSv4-only server that mounts fine. Compare the client's address with the list.</p></div></div>
 <div class="r" id="storage-and-filesystems-583ee4" data-in="Storage and filesystems NFS"><code class="k">sudo exportfs -v</code><div class="m"><p>Run on the server: each export with its options (<b>rw</b>, <b>sync</b>, <b>root_squash</b>) and the clients it allows. After editing <code>/etc/exports</code>, <code>sudo exportfs -ra</code> applies it without a restart.</p></div></div>
 <div class="r x" id="storage-and-filesystems-ab3f1a" data-in="Storage and filesystems NFS"><code class="k">nfs: server HOST not responding, still trying</code><div class="m"><p>A hard mount keeps retrying forever, so processes using it sit in state D until the server answers. &quot;nfs: server HOST OK&quot; follows when it does. <b>Check</b> the network path and <code>rpcinfo -p HOST</code>. <code>umount -f</code> or <code>-l</code> is the last resort.</p></div></div>
@@ -746,7 +754,7 @@ nft monitor trace</code><div class="m"><p>Adds a temporary table that marks pack
 <div class="r" id="dns-ports-and-packets-6203bf" data-in="DNS, ports and packets Packets and firewall"><code class="k">iptables-save | head -60</code><div class="m"><p>Every table in a form you can diff and read, including the nat rules Docker and kube-proxy write. Compare with a healthy node.</p></div></div>
 <div class="r" id="dns-ports-and-packets-8fbdca" data-in="DNS, ports and packets Packets and firewall"><code class="k">sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max</code><div class="m"><p>The connection tracking table. When it is full the kernel drops new connections and logs &quot;table full&quot; in <code>dmesg</code>.</p></div></div>
 <div class="r" id="dns-ports-and-packets-4e2df0" data-in="DNS, ports and packets Packets and firewall"><code class="k">conntrack -S</code><div class="m"><p>One line per CPU. <b>insert_failed</b>, <b>drop</b>, <b>early_drop</b> and <b>invalid</b> rising mean the table is full or NAT collisions are happening. <b>chaintoolong</b> points at a hash table that is too small.</p></div></div>
-<div class="r" id="dns-ports-and-packets-aab877" data-in="DNS, ports and packets Packets and firewall"><code class="k">conntrack -L -p tcp --state ESTABLISHED | wc -l</code><div class="m"><p>How many established flows are tracked. It lists from the same table the sysctl counts. Replace <code>ESTABLISHED</code> with <code>TIME_WAIT</code> or <code>SYN_SENT</code> to see which state fills it.</p></div></div>
+<div class="r" id="dns-ports-and-packets-aab877" data-in="DNS, ports and packets Packets and firewall"><code class="k">conntrack -L -p tcp --state ESTABLISHED | wc -l</code><div class="m"><p>How many established flows are tracked. It lists from the same table the sysctl counts. Heavy on a full table: <code>conntrack -C</code> counts the entries without listing them. Replace <code>ESTABLISHED</code> with <code>TIME_WAIT</code> or <code>SYN_SENT</code> to see which state fills it.</p></div></div>
 <div class="r" id="dns-ports-and-packets-9bcea9" data-in="DNS, ports and packets Packets and firewall"><code class="k">sysctl net.netfilter.nf_conntrack_tcp_timeout_established</code><div class="m"><p>How long an idle established flow stays tracked: 432000 seconds, 5 days, by default. A long value fills the table with dead flows, a short one resets idle connections.</p></div></div>
 </div></div>
 <div class="grp"><h3>Neighbours and drops</h3><div class="t">
@@ -758,7 +766,7 @@ nft monitor trace</code><div class="m"><p>Adds a temporary table that marks pack
 <div class="r" id="dns-ports-and-packets-c2a3d9" data-in="DNS, ports and packets Neighbours and drops"><code class="k">awk '{print NR-1, $1, $2, $3}' /proc/net/softnet_stat</code><div class="m"><p>One line per CPU in hexadecimal: processed, dropped, time_squeeze. A growing <b>dropped</b> means the per-CPU backlog overflowed (<code>net.core.netdev_max_backlog</code>), and <b>time_squeeze</b> means the CPU ran out of budget in the receive loop.</p></div></div>
 <div class="r" id="dns-ports-and-packets-69c605" data-in="DNS, ports and packets Neighbours and drops"><code class="k">ip neigh show</code><div class="m"><p>The ARP (IPv4) and neighbour discovery (IPv6) table. REACHABLE and STALE are fine. <b>FAILED</b> or <b>INCOMPLETE</b> on the gateway means nobody answered the ARP request: a wrong VLAN, a dead peer, or a cable.</p></div></div>
 <div class="r" id="dns-ports-and-packets-5e13d1" data-in="DNS, ports and packets Neighbours and drops"><code class="k">ip -s neigh show dev <var data-p="IFACE">IFACE</var></code><div class="m"><p>Adds the age of each entry and the probe count. Many entries in INCOMPLETE together suggest a scan, or a subnet mask set too wide.</p></div></div>
-<div class="r" id="dns-ports-and-packets-62fcbc" data-in="DNS, ports and packets Neighbours and drops"><code class="k">arping -c 3 -I <var data-p="IFACE">IFACE</var> <var data-p="IP">IP</var></code><div class="m"><p>Asks who has that address at layer 2, with no IP routing involved. A reply from two different MAC addresses is a duplicate IP address.</p></div></div>
+<div class="r" id="dns-ports-and-packets-62fcbc" data-in="DNS, ports and packets Neighbours and drops"><code class="k">arping -c 3 -I <var data-p="IFACE">IFACE</var> <var data-p="IP">IP</var></code><div class="m"><p>Asks who has that address at layer 2, with no IP routing involved. A reply from two different MAC addresses is a duplicate IP address. This is the iputils <code>arping</code>; the Habets one takes <code>-i</code> for the interface.</p></div></div>
 <div class="r x" id="dns-ports-and-packets-4846ee" data-in="DNS, ports and packets Neighbours and drops"><code class="k">arp_cache: neighbor table overflow!</code><div class="m"><p>Seen in <code>dmesg</code>: more neighbours than <code>net.ipv4.neigh.default.gc_thresh3</code> allows, typical on a large flat network or a node with many pods. Raise the three <code>gc_thresh</code> values.</p></div></div>
 </div></div>
 <div class="grp"><h3>Socket states</h3><div class="t">
@@ -825,7 +833,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r" id="tls-and-certificates-231fd3" data-in="TLS and certificates Expiry across a whole host"><code class="k">find /etc -type f -name '*.pem' | while read -r f; do printf '%s  ' &quot;$f&quot;; openssl x509 -in &quot;$f&quot; -noout -enddate 2&gt;/dev/null || echo 'not a certificate'; done</code><div class="m"><p>The expiry date of each certificate file, and the files that are not certificates. Sort by the date to find what expires first.</p></div></div>
 <div class="r" id="tls-and-certificates-cedb88" data-in="TLS and certificates Expiry across a whole host"><code class="k">printf 'changeit\n' | keytool -list -v -keystore <var data-p="FILE">FILE</var> | grep -E 'Alias name|Valid from'</code><div class="m"><p>The aliases in a Java keystore with their validity windows. Replace <code>changeit</code> with the real password, typed at a prompt instead of piped when it is a secret.</p></div></div>
 <div class="r" id="tls-and-certificates-e795a3" data-in="TLS and certificates Expiry across a whole host"><code class="k">kubectl -n <var data-p="NS">NS</var> get secret <var data-p="APP">APP</var> -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -enddate</code><div class="m"><p>The expiry of a certificate stored in a Kubernetes TLS secret. Cert-manager renews its secrets on its own: if this date is near, look at the Certificate resource's events.</p></div></div>
-<div class="r" id="tls-and-certificates-aaab45" data-in="TLS and certificates Expiry across a whole host"><code class="k">certbot certificates</code><div class="m"><p>Every certificate certbot manages, its domains, the <b>Expiry Date</b> and &quot;VALID: N days&quot;. If renewal failed, <code>certbot renew --dry-run</code> shows why.</p></div></div>
+<div class="r" id="tls-and-certificates-aaab45" data-in="TLS and certificates Expiry across a whole host"><code class="k">certbot certificates</code><div class="m"><p>Every certificate certbot manages, its domains, the <b>Expiry Date</b> and &quot;VALID: N days&quot;. If renewal failed, <code>certbot renew --dry-run</code> shows why. It runs your <code>--pre-hook</code> and <code>--post-hook</code> (not <code>--deploy-hook</code>), reloads nginx or apache when those plugins are used, and <code>--standalone</code> needs port 80 free.</p></div></div>
 </div></div>
 <div class="grp"><h3>Mutual TLS (client certificates)</h3><div class="t">
 <div class="r" id="tls-and-certificates-ccb4fe" data-in="TLS and certificates Mutual TLS (client certificates)"><code class="k">openssl s_client -connect <var data-p="HOST">HOST</var>:443 -servername <var data-p="HOST">HOST</var> &lt;/dev/null 2&gt;/dev/null | sed -n '/Acceptable client certificate CA names/,/Requested Signature/p'</code><div class="m"><p>A server that asks for a client certificate lists the CAs it accepts here. &quot;No client certificate CA names sent&quot; means it does not ask, or asks without a list.</p></div></div>
@@ -867,7 +875,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="tls-and-certificates-244171" data-in="TLS and certificates Java and Go errors"><code class="k">No subject alternative DNS name matching NAME found.</code><div class="m"><p>The certificate has DNS SANs and none matches. &quot;No name matching NAME found&quot; means it has no DNS SAN and the CN did not match either. For an IP, the SAN needs an IP entry.</p></div></div>
 <div class="r x" id="tls-and-certificates-89976a" data-in="TLS and certificates Java and Go errors"><code class="k">javax.net.ssl.SSLHandshakeException: Received fatal alert: certificate_required</code><div class="m"><p>The server asked for a client certificate. Give the JVM a client keystore (<code>javax.net.ssl.keyStore</code>) and supply its password from the app configuration, not the command line.</p></div></div>
 <div class="r x" id="tls-and-certificates-3f3706" data-in="TLS and certificates Java and Go errors"><code class="k">javax.net.ssl.SSLException: Unsupported or unrecognized SSL message</code><div class="m"><p>The JVM spoke TLS to a port that answered in plain text, or the reverse. Check the URL scheme and port.</p></div></div>
-<div class="r x" id="tls-and-certificates-1b3715" data-in="TLS and certificates Java and Go errors"><code class="k">tls: failed to verify certificate: x509: certificate signed by unknown authority</code><div class="m"><p>Go does not trust the issuer: a private CA, or a missing intermediate. Go uses the system store. <code>SSL_CERT_FILE</code> replaces it with one bundle, so that file must hold the public roots too. <code>SSL_CERT_DIR</code> adds directories. Older Go versions print only the &quot;x509:&quot; part.</p></div></div>
+<div class="r x" id="tls-and-certificates-1b3715" data-in="TLS and certificates Java and Go errors"><code class="k">tls: failed to verify certificate: x509: certificate signed by unknown authority</code><div class="m"><p>Go does not trust the issuer: a private CA, or a missing intermediate. Go uses the system store. <code>SSL_CERT_FILE</code> replaces the default bundle file, so that file must hold the public roots too. <code>SSL_CERT_DIR</code> replaces the default list of directories. Older Go versions print only the &quot;x509:&quot; part.</p></div></div>
 <div class="r x" id="tls-and-certificates-7d8267" data-in="TLS and certificates Java and Go errors"><code class="k">x509: certificate is valid for other.test, not srv.test</code><div class="m"><p>Go's name mismatch error: it lists the names the certificate covers. Compare them with the host in the URL.</p></div></div>
 <div class="r x" id="tls-and-certificates-ef3da4" data-in="TLS and certificates Java and Go errors"><code class="k">x509: certificate has expired or is not yet valid: current time 2026-11-20T16:15:00Z is after 2020-02-01T00:00:00Z</code><div class="m"><p>Go prints both dates: &quot;is after&quot; means expired, &quot;is before&quot; means not yet valid, usually a wrong clock. Compare with <code>date -u</code>.</p></div></div>
 <div class="r x" id="tls-and-certificates-3cd665" data-in="TLS and certificates Java and Go errors"><code class="k">x509: cannot validate certificate for 10.0.0.5 because it doesn't contain any IP SANs</code><div class="m"><p>The URL has an IP address and the certificate has only DNS names. Use the DNS name, or issue a certificate with an IP SAN.</p></div></div>
@@ -899,7 +907,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="http-proxies-load-balancers-0b32e7" data-in="HTTP, proxies, load balancers nginx"><code class="k">10.0.0.9 &quot;GET /slow HTTP/1.1&quot; 504 rt=1.001 urt=1.001 uct=0.000 uht=- us=504 ua=10.0.0.5:8081</code><div class="m"><p>An access line from a <code>log_format</code> with <code>$request_time</code> (<b>rt</b>), <code>$upstream_response_time</code> (<b>urt</b>), <code>$upstream_connect_time</code> (<b>uct</b>), <code>$upstream_header_time</code> (<b>uht</b>), <code>$upstream_status</code> (<b>us</b>) and <code>$upstream_addr</code> (<b>ua</b>). Add them: they show whether the delay is in connecting or in the app. <b>uht</b> <code>-</code> means no headers ever came.</p></div></div>
 </div></div>
 <div class="grp"><h3>HAProxy</h3><div class="t">
-<div class="r" id="http-proxies-load-balancers-533a64" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">haproxy -c -f /etc/haproxy/haproxy.cfg</code><div class="m"><p>Checks the config without starting. A valid file prints nothing and exits 0, so test the exit status; warnings and errors print with the line number.</p></div></div>
+<div class="r" id="http-proxies-load-balancers-533a64" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">haproxy -c -f /etc/haproxy/haproxy.cfg</code><div class="m"><p>Checks the config without starting. A valid file prints <code>Configuration file is valid</code> (nothing with <code>-q</code>) and exits 0, so test the exit status; warnings and errors print with the line number.</p></div></div>
 <div class="r" id="http-proxies-load-balancers-c34516" data-in="HTTP, proxies, load balancers HAProxy" data-tags="changes"><code class="k">haproxy -c -f /etc/haproxy/haproxy.cfg &amp;&amp; systemctl reload haproxy</code><div class="m"><p>Validate, then start a new process with the new config. The old process keeps its open connections until they end, so a long-lived tunnel can outlast the reload.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="http-proxies-load-balancers-077a43" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">echo 'show stat' | socat stdio /run/haproxy/admin.sock | cut -d, -f1,2,5,8,18,37,38,44</code><div class="m"><p>One line per frontend, backend and server: <b>scur</b> (current sessions), <b>stot</b>, <b>status</b>, <b>check_status</b>, <b>check_code</b> and <b>hrsp_5xx</b>. The socket path is the <code>stats socket</code> line in the config. Read it as a table first, then dig into other columns.</p></div></div>
 <div class="r x" id="http-proxies-load-balancers-2a78d2" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">be,s1,0,0,DOWN,L4CON,,0</code><div class="m"><p>A server row of <code>show stat</code>. Status <b>UP</b> or <b>DOWN</b>, <b>MAINT</b> (disabled), <b>DRAIN</b> (no new sessions), <b>NOLB</b>, and <code>UP 1/2</code> when a check has failed but the server is still counted as up. <b>L4CON</b> is connection refused, <b>L4TOUT</b> a timeout, <b>L7STS</b> a bad HTTP status, <b>L7OK</b> a pass.</p></div></div>
@@ -907,7 +915,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r" id="http-proxies-load-balancers-0462a2" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">echo 'show info' | socat stdio /run/haproxy/admin.sock | grep -E '^(Version|Uptime_sec|Maxconn|CurrConns|ConnRate|SessRate|Idle_pct|Run_queue|Ulimit-n)'</code><div class="m"><p>The process: version, uptime, <b>CurrConns</b> against <b>Maxconn</b>, rates, and <b>Idle_pct</b>. A falling <b>Idle_pct</b> is CPU saturation. <b>Maxconn</b> far below what you expect is a <code>ulimit</code> problem.</p></div></div>
 <div class="r" id="http-proxies-load-balancers-9cd671" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">echo 'show errors' | socat stdio /run/haproxy/admin.sock</code><div class="m"><p>The last invalid request or response of each frontend and backend, with the position of the first bad byte. A <code>&lt;BADREQ&gt;</code> or 502 in the log with no obvious cause shows its bytes here.</p></div></div>
 <div class="r" id="http-proxies-load-balancers-8cf1b6" data-in="HTTP, proxies, load balancers HAProxy"><code class="k">echo 'show resolvers' | socat stdio /run/haproxy/admin.sock</code><div class="m"><p>For servers resolved through DNS: queries sent, valid answers, and errors such as <b>nx</b>, <b>timeout</b> and <b>refused</b>. A server shown as &quot;MAINT (resolution)&quot; in <code>show stat</code> is waiting for a working answer.</p></div></div>
-<div class="r" id="http-proxies-load-balancers-903499" data-in="HTTP, proxies, load balancers HAProxy" data-tags="changes"><code class="k">echo 'set server <var data-p="BACKEND">BACKEND</var>/<var data-p="SRVNAME">SRVNAME</var> state drain' | socat stdio /run/haproxy/admin.sock</code><div class="m"><p>Stops new sessions to one server and lets the open ones finish. <code>state ready</code> puts it back. <code>disable server BACKEND/SRVNAME</code> takes it out at once, and <code>enable server</code> returns it.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="http-proxies-load-balancers-903499" data-in="HTTP, proxies, load balancers HAProxy" data-tags="changes"><code class="k">echo 'set server <var data-p="BACKEND">BACKEND</var>/<var data-p="SRVNAME">SRVNAME</var> state drain' | socat stdio /run/haproxy/admin.sock</code><div class="m"><p>Stops new sessions to one server and lets the open ones finish. <code>state ready</code> puts it back. <code>disable server BACKEND/SRVNAME</code> takes it out at once, and <code>enable server</code> returns it. These commands need a <code>stats socket</code> line with <code>level admin</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 </div></div>
 <div class="grp"><h3>HAProxy log lines</h3><div class="t">
 <div class="r x" id="http-proxies-load-balancers-b56502" data-in="HTTP, proxies, load balancers HAProxy log lines"><code class="k">10.0.0.9:58882 [20/Nov/2026:16:17:48.687] fe be_ok/s1 0/0/0/-1/2002 504 198 - - sH-- 1/1/0/0/0 0/0 &quot;GET /slow HTTP/1.1&quot;</code><div class="m"><p>The HTTP log format: client, time, frontend, <b>backend/server</b>, <b>TR/Tw/Tc/Tr/Ta</b>, status, bytes, then the four-letter termination state, then connection counts. In the timers, -1 means the phase never happened: here no response came (<b>Tr</b>) and the request ended after 2002 ms.</p></div></div>
@@ -961,7 +969,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="http-proxies-load-balancers-841a05" data-in="HTTP, proxies, load balancers Status codes"><code class="k">460</code><div class="m"><p>AWS Application Load Balancer: the client closed the connection before the target answered (<code>target_processing_time</code> -1 in the log). The client's timeout is shorter than the target's response time: raise it, or make the target answer sooner.</p></div></div>
 <div class="r x" id="http-proxies-load-balancers-dd370a" data-in="HTTP, proxies, load balancers Status codes"><code class="k">521, 522, 524</code><div class="m"><p>Cloudflare origin errors. 521: the origin refused the connection. 522: the connect to the origin timed out. 524: the origin accepted but took longer than 100 seconds to answer.</p></div></div>
 <div class="r x" id="http-proxies-load-balancers-6377ef" data-in="HTTP, proxies, load balancers Status codes"><code class="k">ERR_TOO_MANY_REDIRECTS</code><div class="m"><p>A redirect loop, shown by curl as exit 47, &quot;Maximum (50) redirects followed&quot;. Often TLS ends at the load balancer and the app redirects HTTP to HTTPS because it never saw <code>X-Forwarded-Proto</code>.</p></div></div>
-<div class="r x" id="http-proxies-load-balancers-54064a" data-in="HTTP, proxies, load balancers Status codes"><code class="k">WebSocket drops after exactly 60 seconds</code><div class="m"><p>nginx closes an idle upgraded connection after <code>proxy_read_timeout</code>. Raise it for that location, or send pings. Without <code>proxy_set_header Upgrade $http_upgrade</code> and <code>Connection &quot;upgrade&quot;</code> it fails at once.</p></div></div>
+<div class="r x" id="http-proxies-load-balancers-54064a" data-in="HTTP, proxies, load balancers Status codes"><code class="k">WebSocket drops after exactly 60 seconds</code><div class="m"><p>nginx closes an idle upgraded connection after <code>proxy_read_timeout</code>. Raise it for that location, or send pings. Without <code>proxy_http_version 1.1;</code>, <code>proxy_set_header Upgrade $http_upgrade</code> and <code>Connection &quot;upgrade&quot;</code> it fails at once.</p></div></div>
 </div></div>
 <div class="grp"><h3>nginx error log</h3><div class="t">
 <div class="r x" id="http-proxies-load-balancers-494dd7" data-in="HTTP, proxies, load balancers nginx error log"><code class="k">connect() failed (111: Connection refused) while connecting to upstream</code><div class="m"><p>Nothing listens at the upstream address.</p></div></div>
@@ -1024,7 +1032,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r" id="containers-and-kubernetes-cb53a5" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get events -A --sort-by=.lastTimestamp | tail -30</code><div class="m"><p>The cluster's recent story across every namespace.</p></div></div>
 <div class="r" id="containers-and-kubernetes-565c23" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get events -A --field-selector type!=Normal --sort-by=.lastTimestamp</code><div class="m"><p>Warnings only. Events live for about an hour, so read them soon after the failure.</p></div></div>
 <div class="r" id="containers-and-kubernetes-95b317" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl events --for pod/<var data-p="POD">POD</var> --types=Warning</code><div class="m"><p>The Events of one object. Needs kubectl 1.26 or later (<b>k8s1.26+</b>).</p></div></div>
-<div class="r" id="containers-and-kubernetes-369bcf" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get endpointslices -l kubernetes.io/service-name=<var data-p="SVC">SVC</var></code><div class="m"><p>Empty: the Service selector matches no pod, or no pod is Ready.</p></div></div>
+<div class="r" id="containers-and-kubernetes-369bcf" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get endpointslices -l kubernetes.io/service-name=<var data-p="SVC">SVC</var></code><div class="m"><p>Empty: no pod matches the Service selector, or the Service has no selector.</p></div></div>
 <div class="r" id="containers-and-kubernetes-eb9cad" data-in="Containers and Kubernetes kubectl"><code class="k">kubectl get endpointslices -l kubernetes.io/service-name=<var data-p="SVC">SVC</var> -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]}{&quot; ready=&quot;}{.conditions.ready}{&quot;\n&quot;}{end}'</code><div class="m"><p>Each endpoint and whether it is Ready. <code>ready=false</code> is a pod failing its readiness probe: it is listed but gets no traffic.</p></div></div>
 <div class="r" id="containers-and-kubernetes-a36c38" data-in="Containers and Kubernetes kubectl" data-tags="changes"><code class="k">kubectl debug -it <var data-p="POD">POD</var> --image=nicolaka/netshoot --target=<var data-p="CTR">CTR</var></code><div class="m"><p>An ephemeral debug container that shares the target's process namespace.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="containers-and-kubernetes-658847" data-in="Containers and Kubernetes kubectl" data-tags="changes"><code class="k">kubectl run dns --rm -it --restart=Never --image=busybox:1.36 -- nslookup <var data-p="SVC">SVC</var>.<var data-p="NS">NS</var>.svc.cluster.local</code><div class="m"><p>Cluster DNS, tested from inside a pod. Use the full name: busybox does not apply the search path the way glibc does.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
@@ -1044,7 +1052,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r" id="containers-and-kubernetes-3e0194" data-in="Containers and Kubernetes Nodes and pressure" data-tags="danger"><code class="k">kubectl drain <var data-p="NODE">NODE</var> --ignore-daemonsets --delete-emptydir-data</code><div class="m"><p>Cordons, then evicts the pods, which a controller recreates elsewhere. It deletes <code>emptyDir</code> data, and a PodDisruptionBudget can make it wait: add <code>--dry-run=client</code> to see the plan first.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="containers-and-kubernetes-504433" data-in="Containers and Kubernetes Nodes and pressure" data-tags="changes"><code class="k">kubectl debug node/<var data-p="NODE">NODE</var> -it --image=busybox:1.36</code><div class="m"><p>A pod on the node with the host filesystem at <code>/host</code>. Reach the host's logs there without SSH. Delete the debug pod afterwards.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="containers-and-kubernetes-99ee7c" data-in="Containers and Kubernetes Nodes and pressure"><code class="k">systemctl is-active kubelet containerd; journalctl -u kubelet --since '15 min ago' --no-pager | tail -30</code><div class="m"><p>On the node itself: the two services, then the kubelet's recent log. It names failed mounts, probes, evictions and certificate errors.</p></div></div>
-<div class="r x" id="containers-and-kubernetes-f0c351" data-in="Containers and Kubernetes Nodes and pressure"><code class="k">evictionHard: memory.available&lt;100Mi, nodefs.available&lt;10%, imagefs.available&lt;15%</code><div class="m"><p>The kubelet's default hard eviction thresholds. Below one, the kubelet evicts pods (BestEffort first, then Burstable above their requests) and sets a pressure condition. Check <code>/var/lib/kubelet/config.yaml</code> for the real values.</p></div></div>
+<div class="r x" id="containers-and-kubernetes-83b200" data-in="Containers and Kubernetes Nodes and pressure"><code class="k">evictionHard: memory.available&lt;100Mi, nodefs.available&lt;10%, imagefs.available&lt;15%, nodefs.inodesFree&lt;5%</code><div class="m"><p>The kubelet's default hard eviction thresholds. Below one, the kubelet evicts pods (BestEffort first, then Burstable above their requests) and sets a pressure condition. Check <code>/var/lib/kubelet/config.yaml</code> for the real values.</p></div></div>
 </div></div>
 <div class="grp"><h3>Probes and restarts</h3><div class="t">
 <div class="r x" id="containers-and-kubernetes-c8dacb" data-in="Containers and Kubernetes Probes and restarts"><code class="k">Liveness probe failed: HTTP probe failed with statuscode: 500</code><div class="m"><p>Liveness failed, so the kubelet kills the container and starts it again. The status code or error after it is what the probe saw. Look for <b>Killing</b> and &quot;will be restarted&quot; in the Events.</p></div></div>
@@ -1070,7 +1078,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="containers-and-kubernetes-651c78" data-in="Containers and Kubernetes Image pulls"><code class="k">InvalidImageName</code><div class="m"><p>The image reference is malformed: a capital letter in the repository, a space, or an empty tag from an unset variable. Fix the manifest.</p></div></div>
 <div class="r x" id="containers-and-kubernetes-42613a" data-in="Containers and Kubernetes Image pulls"><code class="k">ErrImageNeverPull</code><div class="m"><p><code>imagePullPolicy: Never</code> and the image is not on the node. Load or pull it first, or change the policy.</p></div></div>
 <div class="r" id="containers-and-kubernetes-93d64e" data-in="Containers and Kubernetes Image pulls" data-tags="changes"><code class="k">kubectl create secret generic regcred -n <var data-p="NS">NS</var> --type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson=<var data-p="FILE">FILE</var></code><div class="m"><p>A pull secret built from a Docker <code>config.json</code>, so no password appears on the command line. Reference it in <code>imagePullSecrets</code>. The file holds credentials: delete the copy afterwards.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
-<div class="r" id="containers-and-kubernetes-2022d5" data-in="Containers and Kubernetes Image pulls"><code class="k">sudo crictl images | head; sudo crictl info | grep -iE 'sandboxImage|runtimeType' | head -3</code><div class="m"><p>On the node: the images the runtime holds. The runtime caches by digest, so a mutable tag that moved is still the old image on nodes that already pulled it.</p></div></div>
+<div class="r" id="containers-and-kubernetes-2022d5" data-in="Containers and Kubernetes Image pulls"><code class="k">sudo crictl images | head; sudo crictl info | grep -iE 'sandboxImage|runtimeType' | head -3</code><div class="m"><p>On the node: the images the runtime holds. The runtime caches by digest, so with <code>imagePullPolicy: IfNotPresent</code> a mutable tag that moved is still the old image on nodes that already pulled it.</p></div></div>
 </div></div>
 <div class="grp"><h3>Volumes and PVCs</h3><div class="t">
 <div class="r" id="containers-and-kubernetes-819c2d" data-in="Containers and Kubernetes Volumes and PVCs"><code class="k">kubectl get pvc,pv -A</code><div class="m"><p><b>Bound</b> is good. <b>Pending</b> is waiting for a volume or a first pod. <b>Lost</b> means its volume is gone.</p></div></div>
@@ -1104,7 +1112,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="containers-and-kubernetes-ea6c92" data-in="Containers and Kubernetes RBAC"><code class="k">Error from server (Forbidden): pods is forbidden: User &quot;system:serviceaccount:app:runner&quot; cannot list resource &quot;pods&quot; in API group &quot;&quot; in the namespace &quot;app&quot;</code><div class="m"><p>The message names who, what verb, what resource and where. Add a Role and a RoleBinding for exactly that, rather than cluster-admin.</p></div></div>
 <div class="r" id="containers-and-kubernetes-62742e" data-in="Containers and Kubernetes RBAC"><code class="k">kubectl auth can-i list pods --as=system:serviceaccount:<var data-p="NS">NS</var>:<var data-p="SA">SA</var> -n <var data-p="NS">NS</var></code><div class="m"><p>Prints <b>yes</b> or <b>no</b> for one verb and resource. Needs the right to impersonate.</p></div></div>
 <div class="r" id="containers-and-kubernetes-b63944" data-in="Containers and Kubernetes RBAC"><code class="k">kubectl auth whoami</code><div class="m"><p>Who the API server thinks you are, with groups. Needs kubectl 1.28 or later (<b>k8s1.28+</b>).</p></div></div>
-<div class="r" id="containers-and-kubernetes-c62ef4" data-in="Containers and Kubernetes RBAC"><code class="k">kubectl get rolebindings,clusterrolebindings -A -o wide | grep -w <var data-p="SA">SA</var></code><div class="m"><p>Bindings that name the service account. No line means it has no extra rights.</p></div></div>
+<div class="r" id="containers-and-kubernetes-c62ef4" data-in="Containers and Kubernetes RBAC"><code class="k">kubectl get rolebindings,clusterrolebindings -A -o wide | grep -w <var data-p="SA">SA</var></code><div class="m"><p>Bindings that name the service account. No line means no direct binding; it may still get rights through a group. Run <code>kubectl auth can-i --list</code> as that account for the full picture.</p></div></div>
 <div class="r x" id="containers-and-kubernetes-bbaf97" data-in="Containers and Kubernetes RBAC"><code class="k">exceeded quota: q, requested: pods=1, used: pods=50, limited: pods=50</code><div class="m"><p>A ResourceQuota in the namespace blocks the create. <code>kubectl describe quota -n NS</code> shows the use. Raise the quota or free resources.</p></div></div>
 </div></div>
 <div class="grp"><h3>crictl on the node</h3><div class="t">
@@ -1123,7 +1131,7 @@ openssl pkey -in key.pem -pubout | sha256sum</code><div class="m"><p>The two has
 <div class="r x" id="containers-and-kubernetes-8f3a15" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">etcdserver: request timed out</code><div class="m"><p>etcd is slow, nearly always from its disk. Check <code>etcd_disk_wal_fsync_duration_seconds</code> and use a fast local disk.</p></div></div>
 <div class="r" id="containers-and-kubernetes-08dd69" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">sudo kubeadm certs check-expiration</code><div class="m"><p>Every control-plane certificate with its expiry and days left. kubeadm certificates last one year unless upgraded. The CAs last ten years.</p></div></div>
 <div class="r" id="containers-and-kubernetes-fcf349" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">sudo openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -enddate</code><div class="m"><p>The same check without kubeadm, for one file. A cluster whose certificates expired gives <code>x509: certificate has expired or is not yet valid</code> on every <code>kubectl</code>.</p></div></div>
-<div class="r" id="containers-and-kubernetes-474a64" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">kubectl config view --raw --minify -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d | openssl x509 -noout -enddate</code><div class="m"><p>When your own client certificate in the kubeconfig expires. The output holds a public certificate only, not the key.</p></div></div>
+<div class="r" id="containers-and-kubernetes-474a64" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">kubectl config view --raw --minify -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d | openssl x509 -noout -enddate</code><div class="m"><p>When your own client certificate in the kubeconfig expires. The output holds a public certificate only, not the key. This works only for embedded data: for a <code>client-certificate</code> file path run <code>openssl x509</code> on that file; token and exec users have no client certificate.</p></div></div>
 <div class="r" id="containers-and-kubernetes-7fbe26" data-in="Containers and Kubernetes Control plane, etcd and certificates" data-tags="danger"><code class="k">sudo kubeadm certs renew all</code><div class="m"><p>Renews every kubeadm-managed certificate. Run it on every control-plane node: it renews that node's files only. Then restart each static pod: move its manifest out of <code>/etc/kubernetes/manifests</code>, wait 20 seconds for the pod to stop, and move it back. Copy the new <code>admin.conf</code> for kubectl. Take an etcd snapshot first.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="containers-and-kubernetes-059e97" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">sudo grep -E 'rotateCertificates|serverTLSBootstrap' /var/lib/kubelet/config.yaml; sudo ls /var/lib/kubelet/pki</code><div class="m"><p>Whether the kubelet rotates its own client certificate, and the files it holds. Rotation is on by default in kubeadm clusters.</p></div></div>
 <div class="r x" id="containers-and-kubernetes-7536d7" data-in="Containers and Kubernetes Control plane, etcd and certificates"><code class="k">The connection to the server localhost:8080 was refused - did you specify the right host or port?</code><div class="m"><p>kubectl found no kubeconfig and used its default. Set <code>KUBECONFIG</code> or <code>~/.kube/config</code>.</p></div></div>
@@ -1304,8 +1312,8 @@ jcmd <var data-p="PID">PID</var> VM.command_line</code><div class="m"><p>The fla
 </div></div>
 <div class="grp"><h3>Go</h3><div class="t">
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-ed806a" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">curl -s 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=1' | head -30</code><div class="m"><p>Goroutines grouped by identical stack: the count at the start of each group, then the frames. The first line says <code>goroutine profile: total N</code>. One stack with thousands of goroutines is a leak, usually blocked on a channel or a lock nobody releases. It needs <code>import _ &quot;net/http/pprof&quot;</code> and a server on that port. Keep it on loopback: pprof exposes internals.</p></div></div>
-<div class="r" id="app-runtimes-jvm-nodejs-python-go-a0d40a" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">curl -s 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=2' | head -60</code><div class="m"><p>Every goroutine with its full stack and state, in the same shape as a crash dump: <code>goroutine 98 [running]:</code>, <code>[chan receive]</code>, <code>[select (no cases)]</code>, <code>[IO wait]</code>, <code>[sync.Mutex.Lock]</code>. A goroutine blocked a long time shows it, as in <code>[chan receive, 5 minutes]</code>.</p></div></div>
-<div class="r" id="app-runtimes-jvm-nodejs-python-go-c20386" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">go tool pprof -top -nodecount=15 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'</code><div class="m"><p>A 30-second CPU profile, ranked: <b>flat</b> is time in the function itself, <b>cum</b> includes what it calls. The sample total tells you how busy it was. <code>runtime.asyncPreempt</code> near the top is just a busy loop. Add <code>-http=:8081</code> for the flame graph.</p></div></div>
+<div class="r" id="app-runtimes-jvm-nodejs-python-go-a0d40a" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">curl -s 'http://127.0.0.1:6060/debug/pprof/goroutine?debug=2' | head -60</code><div class="m"><p>Every goroutine with its full stack and state, in the same shape as a crash dump: <code>goroutine 98 [running]:</code>, <code>[chan receive]</code>, <code>[select (no cases)]</code>, <code>[IO wait]</code>, <code>[sync.Mutex.Lock]</code>. A goroutine blocked a long time shows it, as in <code>[chan receive, 5 minutes]</code>. With many goroutines it pauses the program briefly.</p></div></div>
+<div class="r" id="app-runtimes-jvm-nodejs-python-go-c20386" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">go tool pprof -top -nodecount=15 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'</code><div class="m"><p>A 30-second CPU profile, ranked: <b>flat</b> is time in the function itself, <b>cum</b> includes what it calls. The sample total tells you how busy it was. <code>runtime.asyncPreempt</code> near the top is just a busy loop. Add <code>-http=:8081</code> for the flame graph. Profiling costs a few percent of CPU for the 30 seconds.</p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-8e80a5" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">go tool pprof -top -sample_index=inuse_space -nodecount=15 http://127.0.0.1:6060/debug/pprof/heap</code><div class="m"><p>Live heap by function: <b>inuse_space</b> is what is held now, <code>alloc_space</code> all that was allocated. Take two profiles minutes apart and compare with <code>-base</code>: the function that grows is the leak. A heap profile shows the state at the last completed collection.</p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-f3605a" data-in="App runtimes: JVM, Node.js, Python, Go Go" data-tags="changes"><code class="k">kill -QUIT <var data-p="PID">PID</var></code><div class="m"><p>Makes a Go program print every goroutine's stack to stderr, then exit with code 2: &quot;SIGQUIT: quit&quot;. That is the dump for a hung process with no pprof, but it ends the process, so supervisors restart it. Read it from the log. A Java process, by contrast, survives <code>kill -3</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-b01562" data-in="App runtimes: JVM, Node.js, Python, Go Go"><code class="k">GODEBUG=gctrace=1 ./app</code><div class="m"><p>One line per collection on stderr: <code>gc 12 @4.2s 3%: ... 18-&gt;20-&gt;9 MB, 20 MB goal, 8 P</code>. The percentage is time spent in GC so far; the three sizes are heap at start, at end and live. A live size that rises each cycle is a leak; a high percentage means too much garbage.</p></div></div>
@@ -1360,7 +1368,7 @@ fatal error: stack overflow</code><div class="m"><p>Recursion without an end: th
 <div class="grp"><h3>Kafka: resetting offsets</h3><div class="t">
 <div class="r" id="message-queues-4a5f7b" data-in="Message queues Kafka: resetting offsets"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --group <var data-p="GROUPNAME">GROUPNAME</var> --topic <var data-p="TOPIC">TOPIC</var> --reset-offsets --to-earliest --dry-run</code><div class="m"><p>Prints the <b>NEW-OFFSET</b> for each partition and changes nothing; always run it before <code>--execute</code>. The group must be Empty, so stop every consumer first. Swap <code>--to-earliest</code> for <code>--to-latest</code>, <code>--to-offset N</code> or <code>--shift-by -100</code>; Kafka clamps a shift below the earliest offset to the earliest and warns.</p></div></div>
 <div class="r" id="message-queues-2950d4" data-in="Message queues Kafka: resetting offsets"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --group <var data-p="GROUPNAME">GROUPNAME</var> --topic <var data-p="TOPIC">TOPIC</var> --reset-offsets --to-datetime 2026-01-01T00:00:00.000 --dry-run</code><div class="m"><p>Plans a move to the first record at or after that time. An empty partition falls back to the latest offset and prints a <code>Warn:</code> line.</p></div></div>
-<div class="r" id="message-queues-718df9" data-in="Message queues Kafka: resetting offsets" data-tags="changes"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --group <var data-p="GROUPNAME">GROUPNAME</var> --topic <var data-p="TOPIC">TOPIC</var> --reset-offsets --to-earliest --execute</code><div class="m"><p>Replays the whole topic for that group. Everything still on disk is processed again, so consumers must tolerate duplicates. Save each partition's <b>CURRENT-OFFSET</b> from <code>--describe</code> first: to undo, reset each partition back with <code>--to-offset N</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="message-queues-718df9" data-in="Message queues Kafka: resetting offsets" data-tags="changes"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --group <var data-p="GROUPNAME">GROUPNAME</var> --topic <var data-p="TOPIC">TOPIC</var> --reset-offsets --to-earliest --execute</code><div class="m"><p>Replays the whole topic for that group. Everything still on disk is processed again, so consumers must tolerate duplicates. Save each partition's <b>CURRENT-OFFSET</b> from <code>--describe</code> first: to undo, reset each partition back with <code>--topic TOPIC:PARTITION --to-offset N</code> (partitions after the colon, comma-separated), or use <code>--from-file</code> with a CSV.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="message-queues-8af150" data-in="Message queues Kafka: resetting offsets" data-tags="danger"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --group <var data-p="GROUPNAME">GROUPNAME</var> --topic <var data-p="TOPIC">TOPIC</var> --reset-offsets --to-latest --execute</code><div class="m"><p>Skips the backlog: the group never processes records between its old offset and the end. Use it only when dropping the backlog is acceptable, and save the current offsets from <code>--describe</code> first.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="message-queues-f8bca1" data-in="Message queues Kafka: resetting offsets" data-tags="danger"><code class="k">kafka-consumer-groups.sh --bootstrap-server <var data-p="BROKER">BROKER</var> --delete --group <var data-p="GROUPNAME">GROUPNAME</var></code><div class="m"><p>Deletes the group and its committed offsets, so a consumer with the same group id starts from <code>auto.offset.reset</code>. The group must be Empty, or you get <code>GroupNotEmptyException</code>.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
@@ -1561,7 +1569,7 @@ WHERE name LIKE 'autovacuum%' OR name LIKE 'vacuum_%'
 ORDER BY name;</code><div class="m"><p>The thresholds that decide when autovacuum fires: <code>autovacuum_vacuum_scale_factor</code> 0.2 means after 20 percent of the table changed, which is far too late on a huge table. Cost settings decide how fast it runs; the default throttle is gentle.</p></div></div>
 <div class="r" id="postgresql-78cc9f" data-in="PostgreSQL Vacuum and bloat"><code class="k">SELECT relname, reloptions FROM pg_class
 WHERE reloptions IS NOT NULL AND relkind = 'r';</code><div class="m"><p>Per-table autovacuum overrides, including <code>autovacuum_enabled=false</code> left over from a bulk load. Tune a hot table with <code>ALTER TABLE ... SET (autovacuum_vacuum_scale_factor = 0.01)</code>.</p></div></div>
-<div class="r" id="postgresql-ca1549" data-in="PostgreSQL Vacuum and bloat" data-tags="changes"><code class="k">VACUUM (VERBOSE, ANALYZE) <var data-p="TABLENAME">TABLENAME</var>;</code><div class="m"><p>Vacuums and analyzes one table in your session without blocking reads or writes. The verbose output shows pages removed, dead rows &quot;not yet removable&quot;, and the cutoff. It returns space to the OS only from the end of the file.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-ca1549" data-in="PostgreSQL Vacuum and bloat" data-tags="changes"><code class="k">VACUUM (VERBOSE, ANALYZE) <var data-p="TABLENAME">TABLENAME</var>;</code><div class="m"><p>Vacuums and analyzes one table in your session without blocking reads or writes, except that the final truncation briefly takes ACCESS EXCLUSIVE; <code>VACUUM (TRUNCATE false, VERBOSE, ANALYZE)</code> avoids it. The verbose output shows pages removed, dead rows &quot;not yet removable&quot;, and the cutoff. It returns space to the OS only from the end of the file.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="postgresql-3e30d6" data-in="PostgreSQL Vacuum and bloat"><code class="k">LOG:  automatic vacuum of table &quot;app.public.av1&quot;: index scans: 0
 	pages: 34 removed, 222 remain, 256 scanned (100.00% of total)
 	tuples: 16666 removed, 33334 remain, 0 are dead but not yet removable</code><div class="m"><p>Autovacuum finished one table; this needs <code>log_autovacuum_min_duration</code> set (0 logs all). Removed tuples show the work; many &quot;dead but not yet removable&quot; show a horizon holder. Long <b>elapsed</b> and many index scans: raise <code>maintenance_work_mem</code>. PostgreSQL 14 prints <code>0 skipped due to pins, 0 skipped frozen</code> in place of the scanned count, and adds <code>oldest xmin</code> to the tuples line.</p></div></div>
@@ -1570,7 +1578,7 @@ WHERE reloptions IS NOT NULL AND relkind = 'r';</code><div class="m"><p>Per-tabl
 SELECT table_len, dead_tuple_percent, approx_free_percent
 FROM pgstattuple_approx('<var data-p="TABLENAME">TABLENAME</var>');</code><div class="m"><p>A bloat estimate that skips the all-visible pages and reads the rest (<code>pgstattuple()</code> is exact but reads it all). <b>dead_tuple_percent</b> is rows vacuum can reclaim; <b>approx_free_percent</b> is space inside the file that stays allocated and is reusable. Contrib module; the extension needs superuser to create.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="postgresql-95e674" data-in="PostgreSQL Vacuum and bloat"><code class="k">SELECT index_size, avg_leaf_density, leaf_fragmentation
-FROM pgstatindex('<var data-p="INDEXNAME">INDEXNAME</var>');</code><div class="m"><p>A btree's health. <b>avg_leaf_density</b> far below 90 (the fill factor default) with a large <code>index_size</code> is a bloated index; <b>leaf_fragmentation</b> above about 30 hurts range scans. Fix with <code>REINDEX INDEX CONCURRENTLY INDEXNAME;</code>, which needs the extra disk space of a second copy.</p></div></div>
+FROM pgstatindex('<var data-p="INDEXNAME">INDEXNAME</var>');</code><div class="m"><p>A btree's health. It reads the whole index, so it is slow on a large one. <b>avg_leaf_density</b> far below 90 (the fill factor default) with a large <code>index_size</code> is a bloated index; <b>leaf_fragmentation</b> above about 30 hurts range scans. Fix with <code>REINDEX INDEX CONCURRENTLY INDEXNAME;</code>, which needs the extra disk space of a second copy.</p></div></div>
 <div class="r" id="postgresql-4a65e7" data-in="PostgreSQL Vacuum and bloat" data-tags="danger"><code class="k">VACUUM FULL <var data-p="TABLENAME">TABLENAME</var>;</code><div class="m"><p>Rewrites the table and returns space to the OS, but takes an <code>ACCESS EXCLUSIVE</code> lock for the whole run, so reads and writes queue, and it needs free disk equal to the table. Prefer a normal vacuum, or <code>pg_repack</code> (an extension, not in core) for online work.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Transaction ID wraparound</h3><div class="t">
@@ -1587,7 +1595,8 @@ HINT:  To avoid transaction ID assignment failures, execute a database-wide VACU
 You might also need to commit or roll back old prepared transactions, or drop stale replication slots.</code><div class="m"><p>Fewer than about 40 million transactions remain before PostgreSQL refuses new transaction ids, and writes stop when the number reaches 3 million, not 0. Act now: remove horizon holders (prepared transactions, slots, old sessions), then run <code>VACUUM</code> in the named database. PostgreSQL 14 to 16 word the hint &quot;To avoid a database shutdown&quot;.</p></div></div>
 <div class="r x" id="postgresql-d9ad90" data-in="PostgreSQL Transaction ID wraparound"><code class="k">WARNING:  bypassing nonessential maintenance of table &quot;postgres.pg_catalog.pg_type&quot; as a failsafe after 0 index scans
 DETAIL:  The table's relfrozenxid or relminmxid is too far in the past.</code><div class="m"><p>Vacuum hit <code>vacuum_failsafe_age</code> (default 1.6 billion) and now skips index cleanup and throttling to finish freezing fast. It is a rescue, not an error. Find why vacuum fell so far behind.</p></div></div>
-<div class="r x" id="postgresql-d5b16b" data-in="PostgreSQL Transaction ID wraparound"><code class="k">ERROR:  database is not accepting commands that assign new transaction IDs to avoid wraparound data loss in database &quot;DB&quot;</code><div class="m"><p>Writes are refused a few million ids before wraparound. Fix: stop writers, remove prepared transactions and stale slots, then run <code>VACUUM</code> in that database; if even that is refused, start in single-user mode with <code>postgres --single -D DATADIR DB</code>. Reads still work. Wording differs slightly before PostgreSQL 17.</p></div></div>
+<div class="r x" id="postgresql-d5b16b" data-in="PostgreSQL Transaction ID wraparound"><code class="k">ERROR:  database is not accepting commands that assign new transaction IDs to avoid wraparound data loss in database &quot;DB&quot;</code><div class="m"><p>Writes are refused a few million ids before wraparound. Fix: stop writers, remove prepared transactions and stale slots, then run <code>VACUUM</code> in that database; if even that is refused, start in single-user mode (next entry). Reads still work. Wording differs slightly before PostgreSQL 17.</p></div></div>
+<div class="r" id="postgresql-1675b9" data-in="PostgreSQL Transaction ID wraparound" data-tags="danger"><code class="k">postgres --single -D <var data-p="DATADIR">DATADIR</var> <var data-p="DB">DB</var></code><div class="m"><p>Single-user mode for the wraparound fix above: stop the server first and run it as the <code>postgres</code> user. Type <code>VACUUM;</code> at the prompt, then press Ctrl-D. It turns off the wraparound safeguards, so use it only when <code>VACUUM</code> itself is refused.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Slow queries</h3><div class="t">
 <div class="r" id="postgresql-15a49f" data-in="PostgreSQL Slow queries"><code class="k">SELECT calls, round(total_exec_time) AS total_ms,
@@ -1612,7 +1621,7 @@ FROM pg_stat_activity WHERE state = 'active' AND query_id IS NOT NULL;</code><di
 <div class="r" id="postgresql-35d689" data-in="PostgreSQL Slow queries"><code class="k">LOAD 'auto_explain';
 SET auto_explain.log_min_duration = '500ms';
 SET auto_explain.log_analyze = on;
-SET auto_explain.log_buffers = on;</code><div class="m"><p>Logs the plan of any statement over 500 ms in this session, with actual rows and buffers, so you catch the plan of a slow query as the app really runs it (superuser needed for <code>LOAD</code>). For all sessions put <code>auto_explain</code> in <code>shared_preload_libraries</code>. <code>log_analyze</code> adds timing overhead.</p></div></div>
+SET auto_explain.log_buffers = on;</code><div class="m"><p>Logs the plan of any statement over 500 ms in this session, with actual rows and buffers, so you catch the plan of a slow query as the app really runs it (superuser needed for <code>LOAD</code>). For all sessions put <code>auto_explain</code> in <code>shared_preload_libraries</code>. <code>log_analyze</code> adds timing overhead. The logged query text includes literal values.</p></div></div>
 <div class="r x" id="postgresql-af9df8" data-in="PostgreSQL Slow queries"><code class="k">LOG:  duration: 6.210 ms  plan:
 	Query Text: select count(*) from t where v like 'a%';
 	Aggregate  (cost=2099.15..2099.16 rows=1 width=8) (actual time=6.205..6.206 rows=1 loops=1)
@@ -1620,11 +1629,11 @@ SET auto_explain.log_buffers = on;</code><div class="m"><p>Logs the plan of any 
 <div class="r" id="postgresql-cd154a" data-in="PostgreSQL Slow queries"><code class="k">SELECT relname, seq_scan, seq_tup_read, idx_scan, n_live_tup
 FROM pg_stat_user_tables
 ORDER BY seq_tup_read DESC LIMIT 10;</code><div class="m"><p>Big tables read by sequential scans are index candidates. <code>seq_tup_read</code> is the total rows read that way, so it ranks the cost better than the scan count.</p></div></div>
-<div class="r" id="postgresql-cb6587" data-in="PostgreSQL Slow queries" data-tags="changes"><code class="k">psql -h <var data-p="HOST">HOST</var> -d <var data-p="DB">DB</var> -c &quot;ALTER SYSTEM SET log_min_duration_statement = '1s'&quot; -c &quot;SELECT pg_reload_conf()&quot;</code><div class="m"><p>Logs every statement slower than one second, with its duration, from now on (changes <code>postgresql.auto.conf</code>; undo with <code>ALTER SYSTEM RESET log_min_duration_statement</code>). Cheaper than <code>auto_explain</code> when you only need the text.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-cb6587" data-in="PostgreSQL Slow queries" data-tags="changes"><code class="k">psql -h <var data-p="HOST">HOST</var> -d <var data-p="DB">DB</var> -c &quot;ALTER SYSTEM SET log_min_duration_statement = '1s'&quot; -c &quot;SELECT pg_reload_conf()&quot;</code><div class="m"><p>Logs every statement slower than one second, with its duration, from now on (changes <code>postgresql.auto.conf</code>; undo with <code>ALTER SYSTEM RESET log_min_duration_statement</code>). Cheaper than <code>auto_explain</code> when you only need the text. Logged statements include literal values, so the log may hold secrets.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Indexes</h3><div class="t">
 <div class="r" id="postgresql-fdcc83" data-in="PostgreSQL Indexes"><code class="k">SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl, i.indisvalid, i.indisready
-FROM pg_index i WHERE NOT i.indisvalid;</code><div class="m"><p>Invalid indexes. A failed or cancelled <code>CREATE INDEX CONCURRENTLY</code> leaves one behind: it is maintained on every write but never used. Drop it with <code>DROP INDEX CONCURRENTLY</code> and retry, after fixing the cause (often duplicate data for a unique index).</p></div></div>
+FROM pg_index i WHERE NOT i.indisvalid;</code><div class="m"><p>Invalid indexes. A failed or cancelled <code>CREATE INDEX CONCURRENTLY</code> leaves one behind: it is maintained on every write but never used. Drop it with <code>DROP INDEX CONCURRENTLY</code> and retry, after fixing the cause (often duplicate data for a unique index). A concurrent build still in progress also shows here: check <code>pg_stat_progress_create_index</code> before dropping.</p></div></div>
 <div class="r x" id="postgresql-25a612" data-in="PostgreSQL Indexes"><code class="k">ERROR:  could not create unique index &quot;ix_k_uniq&quot;
 DETAIL:  Key (k)=(dup) is duplicated.</code><div class="m"><p>A unique index cannot build because the data already has duplicates. With <code>CONCURRENTLY</code> the failed index stays, invalid. Find the duplicates with <code>GROUP BY k HAVING count(*) &gt; 1</code>, resolve them, drop the invalid index, and build again.</p></div></div>
 <div class="r" id="postgresql-26d2b1" data-in="PostgreSQL Indexes"><code class="k">SELECT pid, relid::regclass AS tbl, index_relid::regclass AS idx, phase,
@@ -1691,7 +1700,7 @@ CONTEXT:  processing remote data for replication origin &quot;pg_16396&quot; dur
 LOG:  waiting for WAL to become available at 0/2F23EDB0</code><div class="m"><p>On a standby that fell too far behind: the primary no longer has the WAL it needs (no slot, or the slot hit <code>max_slot_wal_keep_size</code>). It will retry forever. Rebuild it with a fresh <code>pg_basebackup</code>, or restore from archive if <code>restore_command</code> is set.</p></div></div>
 <div class="r x" id="postgresql-6f99e3" data-in="PostgreSQL Replication"><code class="k">ERROR:  can no longer get changes from replication slot &quot;sub1&quot;
 DETAIL:  This slot has been invalidated because it exceeded the maximum reserved size.</code><div class="m"><p>On the publisher, for a logical slot lost to <code>max_slot_wal_keep_size</code>. PostgreSQL 18 says &quot;can no longer access replication slot&quot;, with the reason <code>wal_removed</code>. The subscription cannot resume: recreate it (<code>DROP SUBSCRIPTION</code> then <code>CREATE SUBSCRIPTION</code>, with <code>copy_data</code> chosen on purpose) and raise the limit or fix the stalled consumer.</p></div></div>
-<div class="r" id="postgresql-995b21" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_pause();</code><div class="m"><p>On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, <code>pg_get_wal_replay_pause_state()</code> says <code>paused</code> and the lag grows. Always resume afterwards.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-995b21" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_pause();</code><div class="m"><p>On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, <code>pg_get_wal_replay_pause_state()</code> says <code>paused</code> and the lag grows. Always resume afterwards: a long pause fills <code>pg_wal</code> on the standby.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="postgresql-122007" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_resume();</code><div class="m"><p>Resumes replay on a paused standby, which then catches up on the WAL it received meanwhile.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="postgresql-f3f71e" data-in="PostgreSQL Replication" data-tags="danger"><code class="k">SELECT pg_promote();</code><div class="m"><p>On a standby: makes it a primary. It cannot be undone, and the old primary must be fixed or rebuilt, never left running, or you get two primaries. Prefer Patroni's switchover if you use it. Check the old primary is down first.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
@@ -1703,8 +1712,8 @@ DETAIL:  This slot has been invalidated because it exceeded the maximum reserved
 <div class="r" id="postgresql-c715ae" data-in="PostgreSQL Failover with Patroni" data-tags="changes"><code class="k">patronictl -c <var data-p="FILE">FILE</var> switchover <var data-p="PGCLUSTER">PGCLUSTER</var> --candidate <var data-p="NODE">NODE</var></code><div class="m"><p>A planned, clean change of leader: connections drop for a few seconds. Only run it when all replicas are <code>streaming</code> with no lag. It asks for confirmation. Check the new leader with <code>list</code> afterwards and let the app reconnect.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="postgresql-6761e2" data-in="PostgreSQL Failover with Patroni" data-tags="danger"><code class="k">patronictl -c <var data-p="FILE">FILE</var> failover <var data-p="PGCLUSTER">PGCLUSTER</var> --candidate <var data-p="NODE">NODE</var></code><div class="m"><p>For a primary that is gone: promotes the candidate even though the old leader cannot cooperate, so unreplicated writes can be lost. Use <code>switchover</code> while the old leader is healthy.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="postgresql-28b563" data-in="PostgreSQL Failover with Patroni" data-tags="danger"><code class="k">patronictl -c <var data-p="FILE">FILE</var> reinit <var data-p="PGCLUSTER">PGCLUSTER</var> <var data-p="NODE">NODE</var></code><div class="m"><p>Wipes the member's data directory and rebuilds it from the leader. Use it for a replica that diverged or fell off the WAL; never on the leader. The rebuild reads the whole database over the network.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
-<div class="r" id="postgresql-0a3c38" data-in="PostgreSQL Failover with Patroni" data-tags="changes"><code class="k">patronictl -c <var data-p="FILE">FILE</var> pause
-patronictl -c <var data-p="FILE">FILE</var> resume</code><div class="m"><p>Pause stops automatic failover (maintenance mode) so you can restart or work on nodes by hand; resume restores it. Do not leave a cluster paused: a primary failure then goes unnoticed.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-b24709" data-in="PostgreSQL Failover with Patroni" data-tags="changes"><code class="k">patronictl -c <var data-p="FILE">FILE</var> pause</code><div class="m"><p>Stops automatic failover (maintenance mode) so you can restart or work on nodes by hand. Do not leave a cluster paused: a primary failure then goes unnoticed.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-18f664" data-in="PostgreSQL Failover with Patroni" data-tags="changes"><code class="k">patronictl -c <var data-p="FILE">FILE</var> resume</code><div class="m"><p>Restores automatic failover after a pause.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="postgresql-93b2ee" data-in="PostgreSQL Failover with Patroni"><code class="k">INFO: Lock owner: node1; I am node2
 INFO: no action. I am (node2), ...</code><div class="m"><p>Normal Patroni heartbeat lines in its log, repeated every <code>loop_wait</code> seconds. They only say who holds the leader lock. Look at the first line that is not one of these (a WARNING or ERROR) to find the problem.</p></div></div>
 </div></div>
@@ -1713,7 +1722,7 @@ INFO: no action. I am (node2), ...</code><div class="m"><p>Normal Patroni heartb
 <div class="r" id="postgresql-2ffaeb" data-in="PostgreSQL Backup and restore"><code class="k">pg_verifybackup <var data-p="DATADIR">DATADIR</var></code><div class="m"><p>Checks a base backup against its <code>backup_manifest</code> (PostgreSQL 13 and later). &quot;backup successfully verified&quot; is the answer you want; a failed checksum or a missing file is reported by name. Verify backups on a schedule, not only at restore time.</p></div></div>
 <div class="r" id="postgresql-2ec798" data-in="PostgreSQL Backup and restore"><code class="k">pg_dump -h <var data-p="HOST">HOST</var> -U <var data-p="DBUSER">DBUSER</var> -Fc -f <var data-p="FILE">FILE</var> <var data-p="DB">DB</var>
 pg_restore -l <var data-p="FILE">FILE</var> | head</code><div class="m"><p>A logical, compressed dump in custom format, then its table of contents. A custom-format dump can be restored selectively and in parallel. Run <code>pg_dump</code> with the same or a newer version than the server. It reads a consistent snapshot but holds an old xmin while it runs.</p></div></div>
-<div class="r" id="postgresql-07b051" data-in="PostgreSQL Backup and restore" data-tags="changes"><code class="k">pg_restore -h <var data-p="HOST">HOST</var> -U <var data-p="DBUSER">DBUSER</var> -d <var data-p="DB">DB</var> -j 4 --no-owner --exit-on-error <var data-p="FILE">FILE</var></code><div class="m"><p>Restores into an existing, empty database in 4 parallel jobs (each job opens a connection; also builds indexes in parallel). <code>--exit-on-error</code> stops at the first failure instead of finishing with &quot;errors ignored on restore: N&quot;. Add <code>--clean --if-exists</code> to replace existing objects. <code>-j</code> works on custom and directory formats, not plain SQL.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-07b051" data-in="PostgreSQL Backup and restore" data-tags="changes"><code class="k">pg_restore -h <var data-p="HOST">HOST</var> -U <var data-p="DBUSER">DBUSER</var> -d <var data-p="DB">DB</var> -j 4 --no-owner --exit-on-error <var data-p="FILE">FILE</var></code><div class="m"><p>Restores into an existing, empty database in 4 parallel jobs (each job opens a connection; also builds indexes in parallel). <code>--exit-on-error</code> stops at the first failure instead of finishing with &quot;errors ignored on restore: N&quot;. <code>--no-owner</code> skips the original owners, so the objects belong to <code>DBUSER</code>. Add <code>--clean --if-exists</code> to replace existing objects: this drops the existing tables and their data first. <code>-j</code> works on custom and directory formats, not plain SQL.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="postgresql-1a6645" data-in="PostgreSQL Backup and restore"><code class="k">pg_restore: error: could not execute query: ERROR:  role &quot;ghost&quot; does not exist
 Command was: ALTER TABLE public.gt OWNER TO ghost;</code><div class="m"><p>The dump was taken with objects owned by a role this server does not have. Create the role first, or restore with <code>--no-owner</code> (and <code>--no-privileges</code> for grants). Without <code>--exit-on-error</code> the run goes on and ends with &quot;warning: errors ignored on restore&quot;.</p></div></div>
 <div class="r x" id="postgresql-42e392" data-in="PostgreSQL Backup and restore"><code class="k">pg_restore: error: input file does not appear to be a valid archive</code><div class="m"><p>The file is not a custom-format, directory or tar dump: compressed with gzip, truncated, or damaged in transfer. A plain SQL dump says &quot;input file appears to be a text format dump. Please use psql.&quot; instead (run it with <code>psql -f FILE</code>). <code>pg_restore -l FILE</code> fails the same way.</p></div></div>
@@ -1762,7 +1771,7 @@ SELECT pg_reload_conf();</code><div class="m"><p>Writes the setting to <code>pos
 <div class="r x" id="postgresql-f0e1db" data-in="PostgreSQL PostgreSQL errors"><code class="k">FATAL:  terminating connection due to idle-in-transaction timeout</code><div class="m"><p><code>idle_in_transaction_session_timeout</code> closed a session that sat in a transaction. The app opened a transaction and did nothing for too long: find the code path, or the pool that does not roll back on release.</p></div></div>
 <div class="r x" id="postgresql-0647b0" data-in="PostgreSQL PostgreSQL errors"><code class="k">canceling statement due to conflict with recovery</code><div class="m"><p>On a replica: vacuum on the primary removed rows your query still needed. Turn on <code>hot_standby_feedback</code> (it then holds back vacuum on the primary) or raise <code>max_standby_streaming_delay</code>. Enable <code>log_recovery_conflict_waits</code> to log each wait. <code>pg_stat_database_conflicts</code> counts them by type.</p></div></div>
 <div class="r x" id="postgresql-caed26" data-in="PostgreSQL PostgreSQL errors"><code class="k">server closed the connection unexpectedly</code><div class="m"><p>The backend died (look for &quot;terminated by signal 9&quot; in the server log and the OOM killer in <code>dmesg</code>), or a firewall or load balancer dropped an idle connection. Enable TCP keepalives and cap the pool's connection lifetime.</p></div></div>
-<div class="r x" id="postgresql-2b0ca1" data-in="PostgreSQL PostgreSQL errors"><code class="k">duplicate key value violates unique constraint &quot;..._pkey&quot;</code><div class="m"><p>Right after a restore: the sequence is behind the data. <code>SELECT setval(pg_get_serial_sequence('TABLENAME', 'id'), max(id)) FROM TABLENAME;</code></p></div></div>
+<div class="r x" id="postgresql-2b0ca1" data-in="PostgreSQL PostgreSQL errors"><code class="k">duplicate key value violates unique constraint &quot;..._pkey&quot;</code><div class="m"><p>Right after a restore: the sequence is behind the data. Run this after writers have stopped: <code>SELECT setval(pg_get_serial_sequence('TABLENAME', 'id'), max(id)) FROM TABLENAME;</code></p></div></div>
 <div class="r x" id="postgresql-90c27d" data-in="PostgreSQL PostgreSQL errors"><code class="k">WARNING:  page verification failed, calculated checksum 49085 but expected 28645
 ERROR:  invalid page in block 1 of relation base/5/17321</code><div class="m"><p>Disk corruption: a data block does not match its checksum (data checksums are on by default from PostgreSQL 18, off before unless set at <code>initdb</code>). Stop the guessing: check the disk and <code>dmesg</code>, then restore the relation from a backup or standby. <code>pg_stat_database.checksum_failures</code> counts them; <code>pg_checksums --check</code> scans a stopped cluster.</p></div></div>
 <div class="r x" id="postgresql-bf2c45" data-in="PostgreSQL PostgreSQL errors"><code class="k">could not extend file: No space left on device</code><div class="m"><p>Disk full. Check <code>pg_wal</code> and replication slots before deleting anything, and never delete WAL files by hand.</p></div></div>
@@ -1801,7 +1810,7 @@ SHOW VARIABLES LIKE 'max_connections';</code><div class="m"><p>Connections again
 <div class="r" id="mysql-and-mariadb-54efda" data-in="MySQL and MariaDB Connections" data-tags="changes mysql8.0+"><code class="k">SET PERSIST max_connections = 400;</code><div class="m"><p>Sets it now and writes it to <code>mysqld-auto.cnf</code> so it survives a restart. MariaDB has no <code>SET PERSIST</code> (syntax error 1064): edit the config file there.</p><p class="tags"><span class="tag t-changes">Changes state</span><span class="tag">MySQL 8.0+</span></p></div></div>
 <div class="r" id="mysql-and-mariadb-1bba29" data-in="MySQL and MariaDB Connections"><code class="k">SHOW GLOBAL VARIABLES WHERE Variable_name IN ('max_connections', 'max_user_connections', 'thread_cache_size', 'wait_timeout', 'max_connect_errors');</code><div class="m"><p>The limits in one view. <b>max_user_connections</b> 0 means no per-account cap; a cap gives error 1226.</p></div></div>
 <div class="r" id="mysql-and-mariadb-2b01ca" data-in="MySQL and MariaDB Connections" data-tags="mysql8.0+"><code class="k">SELECT ROUND(100 * (SELECT variable_value FROM performance_schema.global_status WHERE variable_name = 'Threads_created')
- / (SELECT variable_value FROM performance_schema.global_status WHERE variable_name = 'Connections'), 2) AS pct_new_threads;</code><div class="m"><p>The share of connections that needed a new thread instead of a cached one. Above about 10 percent, raise <code>thread_cache_size</code> (9 on a default MySQL, 151 on MariaDB).</p><p class="tags"><span class="tag">MySQL 8.0+</span></p></div></div>
+ / (SELECT variable_value FROM performance_schema.global_status WHERE variable_name = 'Connections'), 2) AS pct_new_threads;</code><div class="m"><p>The share of connections that needed a new thread instead of a cached one. Above about 10 percent, raise <code>thread_cache_size</code> (9 on a default MySQL, 256 on MariaDB).</p><p class="tags"><span class="tag">MySQL 8.0+</span></p></div></div>
 <div class="r" id="mysql-and-mariadb-7b9ec7" data-in="MySQL and MariaDB Connections" data-tags="mariadb10.11+"><code class="k">SELECT ROUND(100 * (SELECT variable_value FROM information_schema.global_status WHERE variable_name = 'Threads_created')
  / (SELECT variable_value FROM information_schema.global_status WHERE variable_name = 'Connections'), 2) AS pct_new_threads;</code><div class="m"><p>The same on MariaDB, which keeps status in <code>information_schema.global_status</code> (MySQL 8 does not have that table).</p><p class="tags"><span class="tag">MariaDB 10.11+</span></p></div></div>
 <div class="r" id="mysql-and-mariadb-e114ab" data-in="MySQL and MariaDB Connections" data-tags="changes mysql8.0+"><code class="k">TRUNCATE performance_schema.host_cache;</code><div class="m"><p>Clears the host cache, which unblocks a host that hit <code>max_connect_errors</code>. Use <code>FLUSH HOSTS;</code> on MariaDB; on MySQL 8.4 it is a syntax error, and before 8.0.23 it was the way.</p><p class="tags"><span class="tag t-changes">Changes state</span><span class="tag">MySQL 8.0+</span></p></div></div>
@@ -1905,7 +1914,7 @@ START SLAVE;</code><div class="m"><p>Skips the next event group on a MariaDB rep
 <div class="r" id="mysql-and-mariadb-682471" data-in="MySQL and MariaDB Replication"><code class="k">SHOW BINARY LOGS;</code><div class="m"><p>The binlog files and sizes. A replica that is far behind needs the files it has not read yet, so check this before purging.</p></div></div>
 <div class="r" id="mysql-and-mariadb-5d20d8" data-in="MySQL and MariaDB Replication" data-tags="danger"><code class="k">PURGE BINARY LOGS BEFORE NOW() - INTERVAL 3 DAY;</code><div class="m"><p>Deletes binlog files older than 3 days, which cannot be undone. Never purge past what the slowest replica still reads (<code>Source_Log_File</code>, <code>Master_Log_File</code> on MariaDB), or it fails with error 1236.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="mysql-and-mariadb-c82170" data-in="MySQL and MariaDB Replication"><code class="k">SHOW VARIABLES LIKE 'binlog_expire_logs_seconds';</code><div class="m"><p>How long binlogs are kept. The default is 2592000 (30 days) on MySQL and 0 (never) on MariaDB, though the Debian and Ubuntu packages and the Docker image set 10 days in <code>50-server.cnf</code>; <code>expire_logs_days</code> is the deprecated older setting.</p></div></div>
-<div class="r" id="mysql-and-mariadb-35b4f5" data-in="MySQL and MariaDB Replication" data-tags="changes"><code class="k">SET GLOBAL binlog_expire_logs_seconds = 259200;</code><div class="m"><p>Keeps 3 days of binlogs and purges older ones on the next rotation. Keep it longer than the longest replica outage or backup interval you must survive.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="mysql-and-mariadb-35b4f5" data-in="MySQL and MariaDB Replication" data-tags="danger"><code class="k">SET GLOBAL binlog_expire_logs_seconds = 259200;</code><div class="m"><p>Keeps 3 days of binlogs and purges older ones on the next rotation. Purged files cannot be recovered, so check the slowest replica first. Keep it longer than the longest replica outage or backup interval you must survive.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Group Replication</h3><div class="t">
 <div class="r" id="mysql-and-mariadb-02858f" data-in="MySQL and MariaDB Group Replication" data-tags="mysql8.0+"><code class="k">SELECT member_host, member_state, member_role, member_version FROM performance_schema.replication_group_members;</code><div class="m"><p><b>member_state</b> ONLINE is healthy. RECOVERING is catching up, UNREACHABLE means the others lost contact, ERROR needs the error log, and OFFLINE with an empty role is a member that left. One PRIMARY unless multi-primary.</p><p class="tags"><span class="tag">MySQL 8.0+</span></p></div></div>
@@ -1922,8 +1931,8 @@ FROM performance_schema.replication_group_member_stats;</code><div class="m"><p>
 </div></div>
 <div class="grp"><h3>Backups</h3><div class="t">
 <div class="r" id="mysql-and-mariadb-94c6e7" data-in="MySQL and MariaDB Backups"><code class="k">mysqldump --single-transaction --routines --triggers --events --set-gtid-purged=OFF -h <var data-p="HOST">HOST</var> -u <var data-p="DBUSER">DBUSER</var> -p <var data-p="DB">DB</var> &gt; <var data-p="FILE">FILE</var></code><div class="m"><p>A consistent dump of InnoDB tables without locking them. It prompts for the password. <code>--set-gtid-purged=OFF</code> leaves the <code>GTID_PURGED</code> line out, which otherwise stops a restore onto a server that already has GTIDs. Add <code>--no-tablespaces</code> without the PROCESS privilege. MySQL only: on MariaDB drop <code>--set-gtid-purged=OFF</code>.</p></div></div>
-<div class="r" id="mysql-and-mariadb-be72d5" data-in="MySQL and MariaDB Backups" data-tags="mysql8.0.26+"><code class="k">mysqldump --single-transaction --source-data=2 --all-databases -u <var data-p="DBUSER">DBUSER</var> -p &gt; <var data-p="FILE">FILE</var></code><div class="m"><p>Writes the binlog file and position as a comment, to start a replica from this dump. <code>--master-data</code> is the old name: 8.4 still accepts it with a deprecation warning.</p><p class="tags"><span class="tag">MySQL 8.0.26+</span></p></div></div>
-<div class="r" id="mysql-and-mariadb-31210a" data-in="MySQL and MariaDB Backups" data-tags="mariadb10.11+"><code class="k">mariadb-dump --single-transaction --master-data=2 --gtid --all-databases -u <var data-p="DBUSER">DBUSER</var> -p &gt; <var data-p="FILE">FILE</var></code><div class="m"><p>MariaDB's tool. The dump carries <code>CHANGE MASTER TO MASTER_USE_GTID=slave_pos</code> and the <code>gtid_slave_pos</code> to start from. <code>--source-data</code> and <code>--set-gtid-purged</code> are rejected here.</p><p class="tags"><span class="tag">MariaDB 10.11+</span></p></div></div>
+<div class="r" id="mysql-and-mariadb-be72d5" data-in="MySQL and MariaDB Backups" data-tags="mysql8.0.26+"><code class="k">mysqldump --single-transaction --source-data=2 --all-databases -u <var data-p="DBUSER">DBUSER</var> -p &gt; <var data-p="FILE">FILE</var></code><div class="m"><p>Writes the binlog file and position as a comment, to start a replica from this dump. At the start it takes a brief global read lock (<code>FLUSH TABLES WITH READ LOCK</code>): it waits for running queries to finish and stalls new ones meanwhile. <code>--master-data</code> is the old name: 8.4 still accepts it with a deprecation warning.</p><p class="tags"><span class="tag">MySQL 8.0.26+</span></p></div></div>
+<div class="r" id="mysql-and-mariadb-31210a" data-in="MySQL and MariaDB Backups" data-tags="mariadb10.11+"><code class="k">mariadb-dump --single-transaction --master-data=2 --gtid --all-databases -u <var data-p="DBUSER">DBUSER</var> -p &gt; <var data-p="FILE">FILE</var></code><div class="m"><p>MariaDB's tool. The dump carries <code>CHANGE MASTER TO MASTER_USE_GTID=slave_pos</code> and the <code>gtid_slave_pos</code> to start from. It takes no global read lock: MariaDB reads the binlog position from the snapshot. <code>--source-data</code> and <code>--set-gtid-purged</code> are rejected here.</p><p class="tags"><span class="tag">MariaDB 10.11+</span></p></div></div>
 <div class="r x" id="mysql-and-mariadb-00870d" data-in="MySQL and MariaDB Backups"><code class="k">mysqlpump is deprecated and will be removed in a future version. Use mysqldump instead.</code><div class="m"><p><code>mysqlpump</code> still ran in MySQL 8.0 with this warning (and needs <code>--set-gtid-purged</code> on a GTID server). It is gone from 8.4 (<a href="https://dev.mysql.com/doc/relnotes/mysql/8.4/en/news-8-4-0.html">release notes</a>): use <code>mysqldump</code> or MySQL Shell.</p></div></div>
 <div class="r" id="mysql-and-mariadb-96f90e" data-in="MySQL and MariaDB Backups" data-tags="mysql8.0.21+"><code class="k">mysqlsh --js -h <var data-p="HOST">HOST</var> -u <var data-p="DBUSER">DBUSER</var> -p -e &quot;util.dumpInstance('/backup/dump1', {threads: 4})&quot;</code><div class="m"><p>MySQL Shell's parallel, consistent dump of the whole instance into an empty directory. It is faster than <code>mysqldump</code> on large data (<a href="https://dev.mysql.com/doc/mysql-shell/8.4/en/mysql-shell-utilities-dump-instance-schema.html">dump utilities</a>). <code>util.dumpSchemas(['DB'], ...)</code> dumps one schema.</p><p class="tags"><span class="tag">MySQL 8.0.21+</span></p></div></div>
 <div class="r" id="mysql-and-mariadb-76aee1" data-in="MySQL and MariaDB Backups" data-tags="mysql8.0.21+ changes"><code class="k">mysqlsh --js -h <var data-p="HOST">HOST</var> -u <var data-p="DBUSER">DBUSER</var> -p -e &quot;util.loadDump('/backup/dump1', {threads: 4})&quot;</code><div class="m"><p>Loads a Shell dump. The target needs <code>local_infile=ON</code> (<code>SET GLOBAL local_infile = ON</code>, switch it off afterwards) or the load stops at the start with an error that names it.</p><p class="tags"><span class="tag">MySQL 8.0.21+</span><span class="tag t-changes">Changes state</span></p></div></div>
@@ -2135,7 +2144,7 @@ fuser -v <var data-p="FILE">FILE</var></code><div class="m"><p>The database and 
 </div></div>
 <div class="grp"><h3>WAL and checkpoints</h3><div class="t">
 <div class="r" id="sqlite-259dad" data-in="SQLite WAL and checkpoints" data-tags="changes"><code class="k">sqlite3 <var data-p="FILE">FILE</var> &quot;PRAGMA wal_checkpoint(PASSIVE);&quot;</code><div class="m"><p>Copies WAL frames into the database file without blocking anyone. It prints three numbers: <b>busy</b> (1 if it could not finish), the frames in the WAL, and the frames copied. <code>0|0|0</code> is an empty WAL. Frames copied below the total means readers still need old data.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
-<div class="r" id="sqlite-f67390" data-in="SQLite WAL and checkpoints" data-tags="changes"><code class="k">sqlite3 <var data-p="FILE">FILE</var> &quot;PRAGMA wal_checkpoint(TRUNCATE);&quot;</code><div class="m"><p>Waits for writers and readers (up to <code>busy_timeout</code>), copies everything and shrinks the <code>-wal</code> file to zero. Output <code>1|268|0</code> means it was blocked: a long read transaction holds an old snapshot, so the WAL cannot be reset and keeps growing. Find that process with <code>fuser -v FILE</code>. <code>RESTART</code> and <code>FULL</code> also exist.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="sqlite-1461a9" data-in="SQLite WAL and checkpoints" data-tags="changes"><code class="k">sqlite3 <var data-p="FILE">FILE</var> &quot;.timeout 5000&quot; &quot;PRAGMA wal_checkpoint(TRUNCATE);&quot;</code><div class="m"><p>Waits for writers and readers (up to 5 seconds with <code>.timeout 5000</code>; the shell default is 0), stalls new writers while it waits, copies everything and shrinks the <code>-wal</code> file to zero. Output <code>1|268|0</code> means it was blocked: a long read transaction holds an old snapshot, so the WAL cannot be reset and keeps growing. Find that process with <code>fuser -v FILE</code>. <code>RESTART</code> and <code>FULL</code> also exist.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="sqlite-ef8a06" data-in="SQLite WAL and checkpoints"><code class="k">-rw-r--r-- 1 root root 1104192 Nov 20 16:19 app.db-wal
 -rw-r--r-- 1 root root   32768 Nov 20 16:19 app.db-shm</code><div class="m"><p>The side files of a database in WAL mode while it is open. The <code>-shm</code> file is an index and is rebuilt on open, but the <code>-wal</code> file holds committed transactions not yet in the main file. Never delete or move a <code>-wal</code> file, or copy only the <code>.db</code>: you lose committed data. A clean close of the last connection checkpoints and removes both.</p></div></div>
 <div class="r x" id="sqlite-e5f0b2" data-in="SQLite WAL and checkpoints"><code class="k">FILE-journal</code><div class="m"><p>A <code>-journal</code> file left next to the database after a crash (rollback-journal mode) is a &quot;hot journal&quot;: the next open rolls the partial transaction back. Keep it with the database; deleting it leaves a half-written file. Copying the database while a writer is active has the same problem.</p></div></div>
@@ -2165,7 +2174,7 @@ fuser -v <var data-p="FILE">FILE</var></code><div class="m"><p>The database and 
 
 <section id="redis">
 <h2>Redis</h2>
-<p class="lede">One command thread serves everyone, so a single slow command stalls every client. The commands work on Valkey too: use <code>valkey-cli</code> for <code>redis-cli</code>, and <code>valkey-sentinel</code> for <code>redis-sentinel</code>.</p>
+<p class="lede">One command thread serves everyone, so a single slow command stalls every client. The commands work on Valkey too: use <code>valkey-cli</code> for <code>redis-cli</code>, <code>valkey-sentinel</code> for <code>redis-sentinel</code>, and <code>valkey-check-aof</code> for <code>redis-check-aof</code>.</p>
 <div class="grp"><h3>Connect and first look</h3><div class="t">
 <div class="r" id="redis-71df61" data-in="Redis Connect and first look"><code class="k">read -rs REDISCLI_AUTH &amp;&amp; export REDISCLI_AUTH &amp;&amp; redis-cli -h <var data-p="HOST">HOST</var> ping</code><div class="m"><p>PONG means up. <code>read -s</code> takes the password without echo and keeps it out of shell history; the variable keeps it out of <code>ps</code>. With <code>-a</code> every user on the host can see it. <code>redis-cli</code> also reads <code>REDISCLI_AUTH</code> for <code>--user</code>.</p></div></div>
 <div class="r" id="redis-ee7399" data-in="Redis Connect and first look"><code class="k">redis-cli INFO server | grep -E 'redis_version|valkey_version|redis_mode|uptime_in_seconds|config_file'</code><div class="m"><p>The version, the mode (<code>standalone</code>, <code>sentinel</code> or <code>cluster</code>), the uptime and the config file in use. A small <code>uptime_in_seconds</code> means it restarted: check the OOM killer and <code>dmesg</code>. Valkey prints <code>redis_version:7.2.4</code> for compatibility; read <code>valkey_version</code>.</p></div></div>
@@ -2289,10 +2298,10 @@ redis-cli -p 26379 SENTINEL sentinels mymaster</code><div class="m"><p>The repli
 </div></div>
 <div class="grp"><h3>ACL</h3><div class="t">
 <div class="r" id="redis-149a60" data-in="Redis ACL"><code class="k">redis-cli ACL WHOAMI
-redis-cli ACL LIST</code><div class="m"><p><code>ACL WHOAMI</code> is the user of this connection. <code>ACL LIST</code> shows each user's rules, such as <code>on #hash ~app:* -@all +get</code>: key patterns after <code>~</code> and commands after <code>+</code> and <code>-</code>. Passwords show as a hash, never in clear.</p></div></div>
+redis-cli ACL LIST</code><div class="m"><p><code>ACL WHOAMI</code> is the user of this connection. <code>ACL LIST</code> shows each user's rules, such as <code>on #hash ~app:* -@all +get</code>: key patterns after <code>~</code> and commands after <code>+</code> and <code>-</code>. Passwords show as a hash, never in clear. The hashes are unsalted SHA-256, so do not paste the output.</p></div></div>
 <div class="r" id="redis-fb9c81" data-in="Redis ACL"><code class="k">redis-cli ACL LOG 10</code><div class="m"><p>The latest refused commands and failed logins, newest first. <b>reason</b>: <code>auth</code>, <code>command</code>, <code>key</code> or <code>channel</code>. <b>object</b>: the command, key or channel. Also <b>username</b>, <b>client-info</b>, <b>age-seconds</b> and <b>count</b> for repeats. Start here for a NOPERM or WRONGPASS.</p></div></div>
 <div class="r" id="redis-e25c1b" data-in="Redis ACL" data-tags="changes"><code class="k">redis-cli ACL LOG RESET</code><div class="m"><p>Clears the log, so new failures stand out after you fix a rule. <code>acllog-max-len</code> (128 by default) sets how many entries are kept; the oldest drop first.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
-<div class="r" id="redis-3cfa60" data-in="Redis ACL"><code class="k">redis-cli ACL GETUSER <var data-p="DBUSER">DBUSER</var></code><div class="m"><p>One user's flags (<code>on</code>, <code>nopass</code>), password hashes, command rules, <code>keys</code> and <code>channels</code> patterns. A user with <code>-@all +get</code> can read, but <code>CONFIG GET</code> and <code>ACL WHOAMI</code> fail with NOPERM. The <code>default</code> user with <code>nopass</code> means no login is needed.</p></div></div>
+<div class="r" id="redis-3cfa60" data-in="Redis ACL"><code class="k">redis-cli ACL GETUSER <var data-p="DBUSER">DBUSER</var></code><div class="m"><p>One user's flags (<code>on</code>, <code>nopass</code>), password hashes (unsalted SHA-256: do not paste the output), command rules, <code>keys</code> and <code>channels</code> patterns. A user with <code>-@all +get</code> can read, but <code>CONFIG GET</code> and <code>ACL WHOAMI</code> fail with NOPERM. The <code>default</code> user with <code>nopass</code> means no login is needed.</p></div></div>
 </div></div>
 <div class="grp"><h3>TLS</h3><div class="t">
 <div class="r" id="redis-6ff25d" data-in="Redis TLS"><code class="k">redis-cli --tls --cacert /etc/redis/tls/ca.crt --cert /etc/redis/tls/client.crt --key /etc/redis/tls/client.key -h <var data-p="HOST">HOST</var> -p <var data-p="PORT">PORT</var> PING</code><div class="m"><p>PONG means the handshake and the certificate chain are fine. The cert and key are needed only when the server has <code>tls-auth-clients yes</code> (the default). <code>redis-cli</code> checks the chain but not the host name, so a pass does not prove the name is on the certificate.</p></div></div>
@@ -2359,7 +2368,7 @@ db.getProfilingStatus()</code><div class="m"><p>Level 1 records operations slowe
 <div class="r" id="mongodb-769ad6" data-in="MongoDB Slow queries and indexes"><code class="k">db.system.profile.find().sort({ts:-1}).limit(5)</code><div class="m"><p>The latest slow operations. <b>millis</b> is the time, <b>ns</b> the collection, <b>planSummary</b> the plan (<code>COLLSCAN</code> or <code>IXSCAN { ... }</code>), <b>keysExamined</b> and <b>docsExamined</b> the work and <b>nreturned</b> the result. Examined far above returned means a missing or wrong index.</p></div></div>
 <div class="r x" id="mongodb-5286ca" data-in="MongoDB Slow queries and indexes"><code class="k">{&quot;t&quot;:{&quot;$date&quot;:&quot;2026-11-20T16:33:58.931+00:00&quot;},&quot;s&quot;:&quot;I&quot;,&quot;c&quot;:&quot;COMMAND&quot;,&quot;msg&quot;:&quot;Slow query&quot;,&quot;attr&quot;:{&quot;type&quot;:&quot;command&quot;,&quot;ns&quot;:&quot;app.c&quot;,&quot;durationMillis&quot;:34,&quot;planSummary&quot;:&quot;COLLSCAN&quot;,&quot;keysExamined&quot;:0,&quot;docsExamined&quot;:60000,&quot;nreturned&quot;:101}}</code><div class="m"><p>A slow query line in the log, shortened. Operations over <code>slowms</code> (100 ms by default; this sample ran with <code>slowms</code> lowered) are logged without the profiler. <b>planSummary</b> <code>COLLSCAN</code> with large <b>docsExamined</b> is a full scan.</p></div></div>
 <div class="r" id="mongodb-b68950" data-in="MongoDB Slow queries and indexes"><code class="k">jq -c 'select(.msg==&quot;Slow query&quot;)|[.attr.ns,.attr.durationMillis,.attr.planSummary,.attr.docsExamined,.attr.nreturned]' /var/log/mongodb/mongod.log | tail</code><div class="m"><p>The latest slow queries as short rows: collection, milliseconds, plan, documents examined and returned. Without <code>jq</code>, use <code>grep '&quot;Slow query&quot;'</code>. Repeated shapes with <code>COLLSCAN</code> are the ones to index first.</p></div></div>
-<div class="r" id="mongodb-692e3d" data-in="MongoDB Slow queries and indexes"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.find({g: 5}).explain(&quot;executionStats&quot;)</code><div class="m"><p><b>winningPlan</b> <code>COLLSCAN</code> reads every document; <code>IXSCAN</code> uses an index. Compare <b>totalDocsExamined</b> with <b>nReturned</b>: 60000 against 600 is a scan for 1 percent of the data. <b>executionTimeMillis</b> and <b>totalKeysExamined</b> show the cost.</p></div></div>
+<div class="r" id="mongodb-692e3d" data-in="MongoDB Slow queries and indexes"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.find({g: 5}).explain(&quot;executionStats&quot;)</code><div class="m"><p><b>winningPlan</b> <code>COLLSCAN</code> reads every document; <code>IXSCAN</code> uses an index. Compare <b>totalDocsExamined</b> with <b>nReturned</b>: 60000 against 600 is a scan for 1 percent of the data. <b>executionTimeMillis</b> and <b>totalKeysExamined</b> show the cost. This runs the query, so a <code>COLLSCAN</code> loads the server.</p></div></div>
 <div class="r" id="mongodb-b590fc" data-in="MongoDB Slow queries and indexes" data-tags="changes"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.createIndex({g: 1, i: -1})</code><div class="m"><p>Builds an index; equality fields first, then sort fields. It builds while the collection stays usable, but costs IO and CPU on every member, so run it off-peak. The same query then reads 600 documents and 600 keys, not 60000.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="mongodb-34e43a" data-in="MongoDB Slow queries and indexes"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.getIndexes()
 db.<var data-p="COLLECTION">COLLECTION</var>.aggregate([{$indexStats:{}}])</code><div class="m"><p>The indexes and how often each was used since the last restart: <b>accesses.ops</b> of 0 on a long-running server is an unused index. Unused indexes cost write speed and cache. Do not drop one right after a restart. The counts are per member: check every member, secondaries included, before calling an index unused.</p></div></div>
@@ -2382,7 +2391,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 <div class="r" id="mongodb-e6c940" data-in="MongoDB Sharding"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.getShardDistribution()</code><div class="m"><p>Data, documents and chunks per shard, with the share of each. A shard far above the others is where the load and the disk go. Run it on the sharded collection through <code>mongos</code>.</p></div></div>
 </div></div>
 <div class="grp"><h3>Backups</h3><div class="t">
-<div class="r" id="mongodb-28654a" data-in="MongoDB Backups"><code class="k">mongodump --uri &quot;mongodb://<var data-p="DBUSER">DBUSER</var>@<var data-p="HOST">HOST</var>:27017/?authSource=admin&amp;replicaSet=<var data-p="REPLSET">REPLSET</var>&amp;readPreference=secondary&quot; --oplog --gzip --archive=<var data-p="FILE">FILE</var></code><div class="m"><p>A consistent dump of the whole replica set from a secondary; <code>--oplog</code> adds the writes made while it ran. With a user and no password it prompts, so nothing is on the command line. <code>--oplog</code> fails with <code>--db</code>: <code>bad option: --oplog mode only supported on full dumps</code>.</p></div></div>
+<div class="r" id="mongodb-28654a" data-in="MongoDB Backups" data-tags="changes"><code class="k">mongodump --uri &quot;mongodb://<var data-p="DBUSER">DBUSER</var>@<var data-p="HOST">HOST</var>:27017/?authSource=admin&amp;replicaSet=<var data-p="REPLSET">REPLSET</var>&amp;readPreference=secondary&quot; --oplog --gzip --archive=<var data-p="FILE">FILE</var></code><div class="m"><p>A consistent dump of the whole replica set from a secondary; <code>--oplog</code> adds the writes made while it ran. With a user and no password it prompts, so nothing is on the command line. <code>FILE</code> is overwritten and every document is read. <code>--oplog</code> fails with <code>--db</code>: <code>bad option: --oplog mode only supported on full dumps</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="mongodb-5e0842" data-in="MongoDB Backups" data-tags="danger"><code class="k">mongorestore --uri &quot;mongodb://<var data-p="DBUSER">DBUSER</var>@<var data-p="HOST">HOST</var>:27017/?authSource=admin&quot; --gzip --archive=<var data-p="FILE">FILE</var> --oplogReplay</code><div class="m"><p>Restores the archive and replays the oplog, for a point in time consistent with the end of the dump. Documents that already exist fail as duplicates; add <code>--drop</code> only if you mean to replace collections. It prints <code>document(s) restored successfully</code>; count the documents after. Restore into an empty or scratch deployment; replaying the oplog over live data can revert or delete newer documents.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>MongoDB errors</h3><div class="t">
@@ -2399,7 +2408,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 <h2>Elasticsearch and OpenSearch</h2>
 <p class="lede">The cluster turns yellow or red when shards cannot be placed, and red is real data unavailable. Disks, heap and thread pools cause most of it. Examples target Elasticsearch 8 with security on, so each curl uses <code>-sS --cacert CA --netrc-file ~/.es.netrc</code> over HTTPS; with security off, as on a dev box or ES 7, use <code>http://</code> and drop those flags. OpenSearch 2.x uses the same API; its differences are in the last group.</p>
 <div class="grp"><h3>Elasticsearch and OpenSearch: connecting safely</h3><div class="t">
-<div class="r" id="elasticsearch-and-opensearch-23d23f" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: connecting safely"><code class="k">(umask 077; read -rsp 'Password: ' PW; printf 'machine <var data-p="HOST">HOST</var>\nlogin elastic\npassword %s\n' &quot;$PW&quot; &gt; ~/.es.netrc; unset PW)</code><div class="m"><p>Never put a password in <code>-u user:pass</code>: it shows in <code>ps</code> and in shell history. This prompts for it and writes <code>~/.es.netrc</code> readable by you only. <code>machine</code> must match the host name in the URL. <code>printf</code> is a shell builtin, so the password never appears in a process list. Use <code>login admin</code> for an OpenSearch demo install. Delete the file when finished.</p></div></div>
+<div class="r" id="elasticsearch-and-opensearch-23d23f" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: connecting safely" data-tags="changes"><code class="k">(umask 077; read -rsp 'Password: ' PW; printf 'machine <var data-p="HOST">HOST</var>\nlogin elastic\npassword %s\n' &quot;$PW&quot; &gt; ~/.es.netrc; unset PW)</code><div class="m"><p>Never put a password in <code>-u user:pass</code>: it shows in <code>ps</code> and in shell history. This prompts for it and writes <code>~/.es.netrc</code> readable by you only. <code>machine</code> must match the host name in the URL. <code>printf</code> is a shell builtin, so the password never appears in a process list. Use <code>login admin</code> for an OpenSearch demo install. Run it in bash: <code>read -rsp</code> fails on dash. An existing <code>~/.es.netrc</code> is replaced. Delete the file when finished.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-089656" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: connecting safely"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/'</code><div class="m"><p>The banner: <b>cluster_name</b>, <b>version.number</b> and, on OpenSearch, <code>&quot;distribution&quot;: &quot;opensearch&quot;</code>. <code>--cacert</code> takes your cluster's CA (the package install puts <code>http_ca.crt</code> there; a Docker image keeps it under <code>config/certs</code>). Never use <code>-k</code> to skip the check.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-b63747" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: connecting safely"><code class="k">curl -sS -u elastic --cacert /etc/elasticsearch/certs/http_ca.crt 'https://<var data-p="HOST">HOST</var>:9200/_cluster/health?pretty'</code><div class="m"><p><code>-u elastic</code> with no colon makes curl prompt for the password, so nothing is stored or visible. Use it for a one-off check. The cluster health, explained next.</p></div></div>
 </div></div>
@@ -2409,7 +2418,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 <div class="r" id="elasticsearch-and-opensearch-ce7746" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cluster/health?wait_for_status=green&amp;timeout=30s&amp;pretty'</code><div class="m"><p>Blocks up to 30 seconds for green. <code>&quot;timed_out&quot;: true</code> means it did not get there and the reported status is the current one. Use it in a script after a rolling restart, never as a monitor.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-f00b50" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cat/nodes?v&amp;h=name,ip,node.role,master,heap.percent,ram.percent,cpu,load_1m,disk.used_percent'</code><div class="m"><p>One row per node. <b>master</b> <code>*</code> marks the elected master. A <b>heap.percent</b> that stays above 85 is pressure, while a high <b>ram.percent</b> is normal (the OS cache). A node missing from the list has left the cluster. <b>node.role</b> letters: <code>m</code> master, <code>d</code> data, <code>i</code> ingest.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-25b49b" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cat/indices?v&amp;health=red&amp;s=index'</code><div class="m"><p>Lists only the red indices. Change <code>red</code> to <code>yellow</code> for the replica gaps. A red index with no documents or sizes has no active shard copy at all right now.</p></div></div>
-<div class="r" id="elasticsearch-and-opensearch-168523" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cat/shards?h=index,shard,prirep,state,unassigned.reason&amp;s=state' | grep UNASSIGNED</code><div class="m"><p>Every unassigned shard and why, such as <code>INDEX_CREATED</code> (a replica with nowhere to go on a single node), <code>NODE_LEFT</code>, <code>ALLOCATION_FAILED</code> or <code>CLUSTER_RECOVERED</code>. <b>prirep</b> <code>p</code> is a primary and <code>r</code> a replica. A <code>p</code> row here is the red one.</p></div></div>
+<div class="r" id="elasticsearch-and-opensearch-168523" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cat/shards?h=index,shard,prirep,state,unassigned.reason&amp;s=state' | grep UNASSIGNED</code><div class="m"><p>Every unassigned shard and why, such as <code>INDEX_CREATED</code> (a replica with nowhere to go on a single node), <code>NODE_LEFT</code>, <code>ALLOCATION_FAILED</code> or <code>CLUSTER_RECOVERED</code>. <b>prirep</b> <code>p</code> is a primary and <code>r</code> a replica. A <code>p</code> row here is the red one. The full shard list is large on big clusters.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-ad6404" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cluster/allocation/explain?pretty'</code><div class="m"><p>Explains one unassigned shard (it chooses; the <b>note</b> says so). Read <b>can_allocate</b>, <b>allocate_explanation</b>, then <b>node_allocation_decisions</b>, where each <b>decider</b> says why a node refused: <code>same_shard</code> (a copy is already there), <code>disk_threshold</code>, <code>filter</code>, <code>awareness</code>, <code>max_retry</code>. 400 means there is nothing unassigned.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-16e871" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc -X POST 'https://<var data-p="HOST">HOST</var>:9200/_cluster/allocation/explain?pretty' -H 'content-type: application/json' -d '{&quot;index&quot;:&quot;<var data-p="INDEXNAME">INDEXNAME</var>&quot;,&quot;shard&quot;:0,&quot;primary&quot;:true}'</code><div class="m"><p>The same for the shard you name. Set <code>&quot;primary&quot;: false</code> for a replica. For a started shard it explains why it stays where it is. A primary with <b>last_allocation_status</b> <code>no_valid_shard_copy</code> has no good copy on any node now in the cluster: bring back the node that held it before you consider anything else.</p></div></div>
 <div class="r" id="elasticsearch-and-opensearch-5fbeb1" data-in="Elasticsearch and OpenSearch Elasticsearch and OpenSearch: cluster health and shards"><code class="k">curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt --netrc-file ~/.es.netrc 'https://<var data-p="HOST">HOST</var>:9200/_cat/allocation?v'</code><div class="m"><p>Shards and disk per node: <b>disk.percent</b>, <b>disk.avail</b>, <b>shards</b>. The <code>UNASSIGNED</code> row counts shards with no home. Compare <b>disk.percent</b> with the watermarks below; a node near 85 percent stops receiving new shards.</p></div></div>
@@ -2475,11 +2484,11 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   <div class="wrap">
     <p>A tag after a block's language says more: <code>changes</code> changes state, <code>danger</code> can lose data, <code>deb</code> and <code>rhel</code> name the one distribution it is for, and a version such as <code>pg16+</code> is the oldest one it runs on.</p>
     <p>Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version. Searchable, click-to-copy and offline: <a href="https://makavli.github.io/server-triage/">the app</a>.</p>
-    <p>Version 1.1.1, free under the MIT licence. Source, issues and the Markdown copy: <a href="https://github.com/makavli/server-triage">github.com/makavli/server-triage</a>.</p>
+    <p>Version 1.1.2, free under the MIT licence. Source, issues and the Markdown copy: <a href="https://github.com/makavli/server-triage">github.com/makavli/server-triage</a>.</p>
   </div>
 </footer>
 
-<div id="toast" class="toast" aria-hidden="true"></div>
+<div id="toast" class="toast" popover="manual" aria-hidden="true"></div>
 <script>// The page's behaviour: search, copy, the Setup panel (your values for the blanks, filters, your data), pins, notes,
 // your own entries, links to one entry, the offline copy and the Install button. The page reads in full without it.
 (() => {
@@ -2502,14 +2511,17 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   function say(msg) {
     toast.textContent = msg;
     toast.classList.add('on');
+    // A manual popover is in the top layer: raised again on each message, it shows above an open Setup panel.
+    if (toast.popover === 'manual') { if (toast.matches(':popover-open')) toast.hidePopover(); toast.showPopover(); }
     status.textContent = msg;
     clearTimeout(timer);
     timer = setTimeout(() => toast.classList.remove('on'), 1800);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Your data: IndexedDB, one record per pin, note and entry, so two open tabs never overwrite each other's work.
-  // Where the browser refuses storage, everything works until the page closes, and Setup says so.
+  // Your data: IndexedDB, one record per pin, note and entry, so two open tabs never overwrite each other's; your values
+  // and your filters are one record each, so there the last tab to change them wins. Where the browser refuses
+  // storage, everything works until the page closes, and Setup says so.
   const db = (() => {
     const STORES = ['pins', 'notes', 'entries', 'prefs'];
     let conn = null;
@@ -2518,8 +2530,9 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       conn ??= new Promise((ok, no) => {
         const r = indexedDB.open('server-triage', 1);
         r.onupgradeneeded = () => { for (const s of STORES) r.result.createObjectStore(s, { keyPath: 'id' }); };
-        r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); ok(r.result); };
-        r.onerror = () => no(r.error);
+        // A connection that closes (another tab upgrades, the browser drops it) or never opens is opened afresh next time.
+        r.onsuccess = () => { const c = r.result; c.onversionchange = () => { c.close(); conn = null; }; c.onclose = () => { conn = null; }; ok(c); };
+        r.onerror = () => { conn = null; no(r.error); };
       });
       return conn;
     }
@@ -2553,15 +2566,18 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
   const time = (v) => (Number.isFinite(v) ? v : Date.now());
   // Characters a screen hides or reorders (controls, format and bidi marks, spaces that are not the plain one, the
-  // default-ignorables, the Braille blank): the command you paste must be the one you read. A file that holds them is
-  // refused and typing drops them; a value is one line, so tab and newline too. It is the build's HIDDEN (a test checks).
+  // default-ignorables, the Braille blank): the command you paste must be the one you read. An entry, a note or a value
+  // in a file that holds them is left out, and typing drops them; a value is one line, so tab and newline too. It is the
+  // build's HIDDEN (a test checks).
   const IN_CODE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/gu;
   const IN_VALUE = new RegExp(`${IN_CODE.source}|[\t\n]`, 'gu');
   const shown = (v, max, re) => str(v, max) && v.replace(re, '') === v;
   // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, no
   // leading - that a command would read as an option, no -- that SQL would read as a comment. Ports and PIDs are digits.
   const SAFE = /^(?!-)(?!.*--)[\w.:/@+=,%-]{1,200}$/;
-  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/ };
+  // A file or a data directory is never the root or the current directory (/, /., .) and never climbs out with a .. step.
+  const PATH = /^(?![/.]+$)(?!(?:.*\/)?\.\.(?:\/|$))(?!-)(?!.*--)[\w.:/@+=,%-]{1,200}$/;
+  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/, FILE: PATH, DATADIR: PATH };
   const fits = (k, v) => (FORMS[k] ?? SAFE).test(v);
   const MAX_ENTRIES = 1000;
   function clean(raw) {
@@ -2569,11 +2585,12 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     const f = obj(o.filters);
     return {
       pins: list(o.pins).filter((p) => str(p?.id, 120) && ID.test(p.id)).map((p) => ({ id: p.id, at: time(p.at) })),
-      notes: list(o.notes).filter((n) => str(n?.id, 120) && ID.test(n.id) && str(n.text, 4000) && n.text.trim())
+      notes: list(o.notes).filter((n) => str(n?.id, 120) && ID.test(n.id) && shown(n.text, 4000, IN_CODE) && n.text.trim())
         .map((n) => ({ id: n.id, text: n.text })),
+      // A trailing newline would run the command the moment it is pasted.
       entries: list(o.entries)
-        .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && str(e.text ?? '', 4000))
-        .map((e) => ({ id: e.id, kind: e.kind, code: e.code, text: e.text ?? '', at: time(e.at) })),
+        .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && shown(e.text ?? '', 4000, IN_CODE))
+        .map((e) => ({ id: e.id, kind: e.kind, code: e.code.replace(/\s+$/, ''), text: e.text ?? '', at: time(e.at) })),
       values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && str(v, 200) && fits(k, v))),
       filters: {
         read: f.read === true,
@@ -2586,7 +2603,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   function adopt(c) {
     state.pins = new Map(c.pins.map((p) => [p.id, p.at]));
     state.notes = new Map(c.notes.map((n) => [n.id, n.text]));
-    state.entries = new Map(c.entries.map((e) => [e.id, e]));
+    state.entries = new Map(c.entries.slice(0, MAX_ENTRIES).map((e) => [e.id, e])); // a database filled past the cap elsewhere
     state.values = c.values;
     state.filters = c.filters;
   }
@@ -2609,9 +2626,10 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   // Saves in the background; a refusal turns the page into a session-only one, and Setup says so.
   function keep(p) {
     p.then(() => {
+      if (loaded && !state.kept) { state.kept = true; summary(); } // storage works again
       chan?.postMessage('changed');
       if (!persisted) { persisted = true; navigator.storage?.persist?.().catch(() => {}); } // ask once not to be evicted
-    }).catch(() => { state.kept = false; summary(); });
+    }).catch(() => { state.kept = false; summary(); say('Not saved: this browser refused to keep that change'); }); // after the toast that said done
   }
   // A pref is one whole record: written before a load succeeded, it would replace the stored values or filters.
   // shortcut: what is typed before the first load answers is shown but not kept; queue it if that ever matters.
@@ -2713,7 +2731,10 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 
   function showPins() {
     for (const b of $$('main .r[id] [data-act="pin"]')) b.setAttribute('aria-pressed', String(state.pins.has(key(b.closest('.r')))));
+    // A copy with its note editor open stays as it is, so a redraw never drops what you are typing.
+    const editing = new Map($$('.r', pinList).filter((r) => $('.note-edit', r)).map((r) => [r.dataset.ref, r]));
     pinList.replaceChildren(...[...state.pins].sort((a, b) => a[1] - b[1]).map(([id]) => {
+      if (editing.has(id)) return editing.get(id);
       const original = document.getElementById(id);
       if (!original?.matches('main section:not(.own) .r')) return null; // a pin whose entry changed: kept, not shown
       const copy = original.cloneNode(true);
@@ -2777,11 +2798,30 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     for (const a of $$('.toc [data-own]')) a.hidden = !(a.dataset.own === 'pinned' ? pinList.children.length : mineList.children.length);
   }
 
+  // Pins and notes whose entry changed since (a new command makes a new anchor) are not on the sheet: Setup lists them.
+  const lostList = $('#lost-list');
+  const orphans = () => [...new Set([...state.pins.keys(), ...state.notes.keys()])]
+    .filter((id) => !document.getElementById(id)?.matches('main section:not(.own) .r'));
+  function showLost() {
+    const ids = orphans();
+    // A list that changed while Delete these was armed (another tab, an import) needs a new yes: it deletes what it shows.
+    const del = $('#lost-del');
+    if (lostList.dataset.ids !== ids.join(' ') && del.dataset.armed) { clearTimeout(Number(del.dataset.armed)); disarms.get(del)(); }
+    lostList.dataset.ids = ids.join(' ');
+    $('#lost').hidden = !ids.length;
+    lostList.replaceChildren(...ids.map((id) => {
+      const li = document.createElement('li');
+      li.textContent = `${id}: ${state.notes.has(id) ? state.notes.get(id) : 'a pin'}`;
+      return li;
+    }));
+  }
+
   function render() {
     showMine();
     showPins();
     showNotes();
     fill();
+    showLost();
     texts = new WeakMap();
     search();
     summary();
@@ -2849,16 +2889,18 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 
   function search() {
     const words = q.value.toLowerCase().split(/\s+/).filter(Boolean).map(expand);
-    let shown = 0;
-    let held = 0;
+    // Counted once per entry: a pinned copy counts as its original.
+    const matched = new Set();
+    const heldBack = new Set();
     for (const row of $$('main [data-in]')) {
       const text = textOf(row);
       const hit = words.every((alts) => alts.some((w) => text.includes(w)));
       const ok = hit && allowed(row);
-      if (hit && !ok) held++;
+      if (hit && !ok) heldBack.add(key(row) || row);
       row.hidden = !ok;
-      if (ok) shown++;
+      if (ok) matched.add(key(row) || row);
     }
+    const [shown, held] = [matched.size, heldBack.size];
     for (const g of $$('main .grp')) g.hidden = !$('[data-in]:not([hidden])', g);
     for (const s of $$('main section')) s.hidden = !$('.grp:not([hidden])', s) && !(s.id === 'mine' && !form.hidden);
     none.hidden = shown > 0;
@@ -2926,7 +2968,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       q.focus();
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      copy(code);
+      if (!e.repeat) copy(code); // a held key copies once
     }
   });
 
@@ -2936,7 +2978,8 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   async function copy(el) {
     try {
       await navigator.clipboard.writeText(el.textContent);
-      say('Copied');
+      const open = [...new Set($$('var:not(.set)', el).map((v) => v.dataset.p))];
+      say(open.length ? `Copied with ${open.join(', ')} still to fill` : 'Copied');
     } catch {
       const range = document.createRange();
       range.selectNodeContents(el);
@@ -2971,7 +3014,10 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     }
     const lost = document.activeElement?.closest('#pinned-list');
     render();
-    if (lost) $(`[id="${id}"] [data-act="pin"]`)?.focus(); // the copy you unpinned from is gone: focus the original
+    if (lost) { // the copy you unpinned from is gone: focus the original, or the search box when it is not shown
+      const original = $(`[id="${id}"] [data-act="pin"]`);
+      if (original && !original.closest('[hidden]')) original.focus(); else q.focus();
+    }
     say(unpin ? 'Unpinned' : 'Pinned to the top');
   }
 
@@ -3009,7 +3055,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     });
     edit.addEventListener('submit', (e) => {
       e.preventDefault();
-      const text = area.value.trim();
+      const text = area.value.replace(IN_CODE, '').trim();
       if (text) {
         state.notes.set(id, text);
         keep(db.put('notes', { id, text }));
@@ -3026,21 +3072,24 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
 
   // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way. A double-click
   // or a quick second click is one act, not a yes, so the second click counts only after a pause; a held key is below.
+  const disarms = new WeakMap();
   function armed(b, e, ask, act) {
     if (b.dataset.armed) {
       if (e.detail > 1 || performance.now() - Number(b.dataset.at) < 600) return;
       clearTimeout(Number(b.dataset.armed));
-      delete b.dataset.armed;
+      disarms.get(b)(); // the button reads as before once it has acted
       act();
       return;
     }
     const label = b.getAttribute('aria-label');
     const text = b.classList.contains('act') ? null : b.textContent;
-    b.dataset.armed = String(setTimeout(() => {
+    const disarm = () => {
       delete b.dataset.armed;
       if (label) b.setAttribute('aria-label', label);
       if (text) b.textContent = text;
-    }, 4000));
+    };
+    disarms.set(b, disarm);
+    b.dataset.armed = String(setTimeout(disarm, 4000));
     b.dataset.at = String(performance.now());
     if (text) b.textContent = ask; else b.setAttribute('aria-label', ask);
     say(ask);
@@ -3073,7 +3122,20 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   // ---------------------------------------------------------------------------------------------------------------
   // Your entries: the form in their section adds one or edits one.
   const kindName = () => { $('#code-name').textContent = form.elements.kind.value === 'err' ? 'Error or state' : 'Command'; };
+  // A draft is what the open form holds beyond the entry it edits: it is never dropped by one stray key or click.
+  const dirty = () => {
+    const rec = state.entries.get(form.dataset.id);
+    const [kind, code, text] = ['kind', 'code', 'text'].map((k) => form.elements[k].value);
+    return !form.hidden && (kind !== (rec?.kind ?? 'cmd') || code !== (rec?.code ?? '') || text !== (rec?.text ?? ''));
+  };
   function openForm(rec) {
+    if (dirty()) {
+      if ('hidePopover' in setup && setup.matches(':popover-open')) setup.hidePopover();
+      form.scrollIntoView({ block: 'center' });
+      form.elements.code.focus({ preventScroll: true });
+      say('Save or cancel the entry you are writing first');
+      return;
+    }
     form.hidden = false;
     form.dataset.id = rec?.id ?? '';
     form.elements.kind.value = rec?.kind ?? 'cmd';
@@ -3089,19 +3151,34 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   function closeForm() {
     form.reset();
     form.hidden = true;
+    form.elements.code.removeAttribute('aria-invalid');
     search();
   }
   form.addEventListener('change', kindName);
   $('[data-act="cancel"]', form).addEventListener('click', () => { closeForm(); q.focus(); });
-  form.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeForm(); q.focus(); } });
+  // Escape closes the form; with a draft in it, only a second Escape within a few seconds does.
+  let dropAt = -Infinity;
+  form.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing || e.repeat) return;
+    e.preventDefault();
+    if (dirty() && performance.now() - dropAt > 4000) { dropAt = performance.now(); say('Press Escape again to drop your draft'); return; }
+    closeForm();
+    q.focus();
+  });
+  form.elements.code.addEventListener('input', () => form.elements.code.removeAttribute('aria-invalid'));
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const code = form.elements.code.value.replace(IN_CODE, '').replace(/\s+$/, '');
-    if (!code.trim()) { form.elements.code.focus(); return; }
+    if (!code.trim()) {
+      form.elements.code.setAttribute('aria-invalid', 'true');
+      form.elements.code.focus();
+      say(form.elements.kind.value === 'err' ? 'Type the error first' : 'Type a command first');
+      return;
+    }
     const old = state.entries.get(form.dataset.id);
     if (!old && state.entries.size >= MAX_ENTRIES) { say(`${MAX_ENTRIES} entries is the most this page keeps`); return; }
     const hex = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, '0')).join('');
-    const rec = { id: old?.id ?? `mine-${hex}`, kind: form.elements.kind.value === 'err' ? 'err' : 'cmd', code, text: form.elements.text.value.trim(), at: old?.at ?? Date.now() };
+    const rec = { id: old?.id ?? `mine-${hex}`, kind: form.elements.kind.value === 'err' ? 'err' : 'cmd', code, text: form.elements.text.value.replace(IN_CODE, '').trim(), at: old?.at ?? Date.now() };
     state.entries.set(rec.id, rec);
     keep(db.put('entries', rec));
     closeForm();
@@ -3126,6 +3203,13 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       savePref('values');
     });
   }
+  // Leaving a field that holds a refused value shows the one that holds again.
+  setup.addEventListener('change', (e) => {
+    const input = e.target;
+    if (!input.matches('input[data-p], input[data-engine]') || !input.hasAttribute('aria-invalid')) return;
+    input.value = (input.dataset.p ? state.values[input.dataset.p] : state.filters.versions[input.dataset.engine]) ?? '';
+    input.removeAttribute('aria-invalid');
+  });
   const read = $('#f-read');
   const distro = $('#f-distro');
   function filtersChanged() {
@@ -3145,12 +3229,13 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       filtersChanged();
     });
   }
+  // The field you are typing in is left alone: a reload because another tab saved must not take your keystrokes.
   function showSetup() {
-    for (const input of $$('input[data-p]', setup)) input.value = state.values[input.dataset.p] ?? '';
     read.checked = state.filters.read;
     distro.value = state.filters.distro;
-    for (const input of $$('input[data-engine]', setup)) {
-      input.value = state.filters.versions[input.dataset.engine] ?? '';
+    for (const input of $$('input[data-p], input[data-engine]', setup)) {
+      if (input === document.activeElement) continue;
+      input.value = (input.dataset.p ? state.values[input.dataset.p] : state.filters.versions[input.dataset.engine]) ?? '';
       input.removeAttribute('aria-invalid');
     }
   }
@@ -3180,25 +3265,36 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
   // from someone else, so one question lists everything it would change first: entries with their code, notes, pins,
   // values and filters.
   const importer = $('#import');
+  const MAX_FILE = 64_000_000; // above the largest export: the most entries and notes this page keeps
+  const engineName = (e) => $(`input[data-engine="${e}"]`, setup)?.closest('.f')?.querySelector('.f-name')?.textContent ?? e;
+  const describe = (f) => [
+    f.read ? 'commands that change state hidden' : 'every command shown',
+    { deb: 'Debian and Ubuntu only', rhel: 'RHEL family only' }[f.distro] ?? 'any Linux',
+    ...Object.entries(f.versions).map(([e, v]) => `${engineName(e)} ${v}`),
+  ].join(', ');
   importer.addEventListener('change', async () => {
     const file = importer.files?.[0];
     importer.value = '';
     if (!file) return;
+    if (file.size > MAX_FILE) { say('That file is over 64 MB, more than an export can be'); return; }
+    let body;
+    try { body = await file.text(); } catch { say('That file could not be read'); return; }
     let raw;
-    try {
-      if (file.size > 5_000_000) throw new Error('too big');
-      raw = JSON.parse(await file.text());
-    } catch {
-      say('That file is not a Server Triage export');
-      return;
-    }
+    try { raw = JSON.parse(body); } catch { say('That file is not a Server Triage export'); return; }
     if (raw?.app !== 'server-triage' || raw.format !== 1) { say('That file is not a Server Triage export'); return; }
+    // Another tab may have changed your data since this one read it: compare with what is stored now. A page whose
+    // saves are refused holds your work only in memory, which a reload would drop.
+    if (loaded && state.kept) { await load(); showSetup(); render(); }
     const c = clean(raw);
     if (state.entries.size + c.entries.filter((e) => !state.entries.has(e.id)).length > MAX_ENTRIES) {
       say(`That file would take you past ${MAX_ENTRIES} entries`);
       return;
     }
     const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+    const size = (v) => (Array.isArray(v) ? v.length : 0);
+    const left = size(raw.pins) + size(raw.notes) + size(raw.entries) + Object.keys(obj(raw.values)).length
+      - c.pins.length - c.notes.length - c.entries.length - Object.keys(c.values).length;
+    const leftOut = `${n(left, 'item', 'items')} in the file left out: hidden characters, a wrong shape, or past what this page keeps`;
     const values = Object.entries(c.values).filter(([k, v]) => state.values[k] !== v);
     const filters = raw.filters !== undefined && JSON.stringify(c.filters) !== JSON.stringify(state.filters);
     const pins = c.pins.filter((p) => !state.pins.has(p.id)).length;
@@ -3207,25 +3303,36 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     const same = (a, b) => a && a.kind === b.kind && a.code === b.code && a.text === b.text;
     const entries = c.entries.filter((e) => !same(state.entries.get(e.id), e));
     const newEntries = entries.filter((e) => !state.entries.has(e.id)).length;
-    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say('Nothing new in that file'); return; }
+    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say(left ? `Nothing new in that file; ${leftOut}` : 'Nothing new in that file'); return; }
     const ask = [`Import ${file.name.replace(IN_VALUE, '').slice(0, 60)}?`];
-    if (entries.length) {
-      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. Each copies as shown:`);
-      // Whole code, never a cut line (the cut part could be what runs), and a long run of blanks is counted, not shown.
-      // Past what a dialog holds, the rest is named, not hidden.
-      let room = 3000;
+    // Whole texts, never a cut line (the cut part could be what runs), and a long run of blanks is counted, not shown.
+    // Past what a dialog holds, the rest is named, not hidden.
+    let room = 3000;
+    const show = (items, text) => {
       let listed = 0;
-      for (const e of entries) {
-        if ((room -= e.code.length) < 0) break;
-        ask.push('', ...e.code.split('\n').map((l) => `  ${l.replace(/[ \t]{8,}/g, (s) => ` [${s.length} blanks] `)}`));
+      for (const it of items) {
+        if ((room -= text(it).length) < 0) break;
+        // A run of empty lines is counted too, so it cannot push the code below what the dialog shows.
+        const body = text(it).replace(/\n(?:[ \t]*\n){2,}/g, (s) => `\n[${s.split('\n').length - 2} empty lines]\n`);
+        ask.push('', ...body.split('\n').map((l) => `  ${l.replace(/[ \t]{8,}/g, (s) => ` [${s.length} blanks] `)}`));
         listed++;
       }
-      if (listed < entries.length) ask.push('', `${n(entries.length - listed, 'more entry does', 'more entries do')} not fit here: read them under Your entries before you copy one.`);
+      return items.length - listed;
+    };
+    if (entries.length) {
+      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. Each copies as shown:`);
+      const more = show(entries, (e) => e.code);
+      if (more) ask.push('', `${n(more, 'more entry does', 'more entries do')} not fit here: read them under Your entries before you copy one.`);
     }
-    if (notes.length) ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced.`);
+    if (notes.length) {
+      ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced:`);
+      const more = show(notes, (x) => x.text);
+      if (more) ask.push('', `${n(more, 'more note does', 'more notes do')} not fit here: read them on the sheet.`);
+    }
     if (pins) ask.push('', `${n(pins, 'pin', 'pins')} added.`);
     if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
-    if (filters) ask.push('', "Your filters are replaced by the file's.");
+    if (filters) ask.push('', `Your filters become the file's: ${describe(c.filters)}.`);
+    if (left) ask.push('', `${leftOut}.`);
     if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
     for (const p of c.pins) if (!state.pins.has(p.id)) state.pins.set(p.id, p.at);
     for (const n of c.notes) state.notes.set(n.id, n.text);
@@ -3243,7 +3350,7 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
     }));
     showSetup();
     render();
-    say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}`);
+    say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}${left ? `; ${n(left, 'item', 'items')} left out` : ''}`);
   });
 
   $('#wipe').addEventListener('click', (e) => {
@@ -3253,6 +3360,16 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       showSetup();
       render();
       say('Your data is deleted');
+    });
+  });
+
+  $('#lost-del').addEventListener('click', (e) => {
+    armed(e.currentTarget, e, 'Click again to delete these', () => {
+      const ids = orphans();
+      for (const id of ids) { state.pins.delete(id); state.notes.delete(id); }
+      keep(db.batch((s) => { for (const id of ids) { s('pins').delete(id); s('notes').delete(id); } }));
+      render();
+      say(`${ids.length === 1 ? 'It is' : 'They are'} deleted`);
     });
   });
 
@@ -3272,14 +3389,18 @@ sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> mean
       }
       return;
     }
+    if (!el.matches('main .r, main section:not(.own)')) return; // a part of the page, not a place on the sheet
+    const filtered = 'Your filters in Setup hide that entry';
+    if (el.matches('.r') && !allowed(el)) { say(filtered); return; } // known before the search is cleared for nothing
     if (el.closest('[hidden]') && q.value) { q.value = ''; search(); }
-    if (el.closest('[hidden]')) { say('Your filters in Setup hide that entry'); return; }
+    if (el.closest('[hidden]')) { say(filtered); return; }
     el.scrollIntoView({ block: 'start' });
     if (el.matches('.r')) $('code', el)?.focus({ preventScroll: true });
   }
   addEventListener('hashchange', go);
 
-  chan?.addEventListener('message', () => load().then(() => { showSetup(); render(); }));
+  // Another tab saved: read it in, unless this page's saves are refused and its work lives only in memory.
+  chan?.addEventListener('message', () => { if (state.kept) load().then(() => { showSetup(); render(); }); });
 
   // ---------------------------------------------------------------------------------------------------------------
   // The app's manifest and offline copy, over http(s) only: a page opened from disk is offline already, and the

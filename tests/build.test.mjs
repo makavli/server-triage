@@ -19,6 +19,11 @@ test('the sheet reads into sections of entries', () => {
   assert.ok(doc.sections.length >= 10, `${doc.sections.length} sections`);
   const rows = doc.sections.flatMap((s) => s.groups).filter((g) => g.kind === 'rows').flatMap((g) => g.items);
   assert.ok(rows.length >= 150, `${rows.length} entries`);
+  // Every fence that opens an entry is read as one, and every ## heading as a section: a parse that stopped early or
+  // merged two would differ.
+  const lines = text('CHEATSHEET.md').split('\n');
+  assert.equal(rows.length, lines.filter((l) => /^```(sh|sql|js|text)\b/.test(l)).length, 'one entry per fence');
+  assert.equal(doc.sections.length, lines.filter((l) => l.startsWith('## ')).length, 'one section per ## heading');
   assert.equal(index.split('<div class="r').length - 1, rows.length, 'every entry is in the page, readable without its script');
 });
 
@@ -38,6 +43,11 @@ test('a mistake in the sheet fails the build with its line', () => {
     ['# U\n', /:7: a second # title/],
     ['```constructor\nls\n```\n\nLists.\n', /:7: a code block must be sh, sql, js or text, not "constructor"/],
     ['## ?!\n', /:7: a section title needs a letter or a digit/],
+    // A section id the page could not keep a pin or a note for: an underscore, a letter outside a-z, too long, mine-.
+    ['## A_b\n', /:7: a section title makes the id "a_b"/],
+    ['## Ré\n', /:7: a section title makes the id "ré"/],
+    [`## ${'x'.repeat(114)}\n`, /:7: a section title makes the id "x{114}"/],
+    ['## mine 0123456789abcdef\n', /:7: a section title makes the id "mine-0123456789abcdef"/],
     ['## Status\n', /:7: a section may not be called "status"/],
     // A bare marker once looped forever: each one fails at its line.
     ...['# ', '## ', '### ', '- ', '1. ', '##   ', '-   '].map((m) => [`${m}\n`, /:7: a heading, step or rule marker with no text/]),
