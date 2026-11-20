@@ -86,6 +86,14 @@ export const PLACEHOLDERS = {
 };
 const BLANK = new RegExp(`\\b(${Object.keys(PLACEHOLDERS).join('|')})\\b`, 'g');
 
+// A character the screen hides or reorders: a control (but tab and newline), a format or bidi mark, a space that is not
+// the plain one, a default-ignorable, the Braille blank. A copied command would differ from the one you read.
+// src/app.js holds the same class as IN_CODE, and a test checks they match.
+export const HIDDEN = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/u;
+
+// Both halves of a switch in one block copy as one paste that undoes itself (the balancer stopped, then started).
+const TOGGLES = [[/stopBalancer/, /startBalancer/], [/REPLICAOF NO ONE/, /REPLICAOF (?!NO ONE)/], [/pg_wal_replay_pause/, /pg_wal_replay_resume/], [/patronictl pause/, /patronictl resume/]];
+
 // The ids render() gives the page's own parts: a section slug may not take one.
 export const FIXED_IDS = ['main', 'q', 'install', 'none', 'status', 'toast', 'setup', 'setup-btn', 'setup-on', 'pinned',
   'pinned-list', 'mine', 'mine-list', 'mine-form', 'add-entry', 'export', 'import', 'wipe', 'data-sum', 'f-read',
@@ -135,9 +143,7 @@ export function parse(md) {
   let group = null;
   let i = 0;
   const fail = (n, msg) => { throw new Error(`CHEATSHEET.md:${n}: ${msg}`); };
-  // A character the screen hides or reorders (a control, a zero-width or bidi mark) would make a copied command differ
-  // from the one you read.
-  lines.forEach((l, n) => { if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(l)) fail(n + 1, 'a hidden character (control, zero-width or bidi): type it out or remove it'); });
+  lines.forEach((l, n) => { if (HIDDEN.test(l)) fail(n + 1, 'a hidden character (a control, a format or bidi mark, an unusual space): type it out or remove it'); });
   const block = /^(#{1,3} |```|\d+\. |- )/;
   const paragraph = () => {
     const out = [];
@@ -190,6 +196,10 @@ export function parse(md) {
       for (i++; i < lines.length && lines[i].trimEnd() !== '```'; i++) code.push(lines[i]);
       if (i >= lines.length) fail(n, 'a code block that is never closed');
       if (!code.join('').trim()) fail(n, 'an empty code block');
+      if (TOGGLES.some(([a, b]) => code.some((l) => a.test(l)) && code.some((l) => b.test(l)))) fail(n, 'both halves of a switch in one block: one paste would undo itself, so give each its own');
+      // A keyword spelled like a blank (CLIENT KILL ID ID) would take your value too: write the keyword in lower case.
+      const twice = lang !== 'text' && code.flatMap((l) => [...l.matchAll(/\b([A-Z][A-Z0-9]*) \1\b/g)].map((m) => m[1])).find((w) => Object.hasOwn(PLACEHOLDERS, w));
+      if (twice) fail(n, `"${twice} ${twice}": a keyword that the blank ${twice} would fill too; write the keyword in lower case`);
       for (i++; i < lines.length && !lines[i].trim(); i++);
       const text = paragraph();
       if (!text) fail(n, 'an entry needs one paragraph right after its code block');

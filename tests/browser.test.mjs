@@ -102,6 +102,12 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
   await until(page, 'window.copied.length === 1', 'the copy');
   assert.match(await js('return window.copied[0];'), /db-1/);
   assert.doesNotMatch(await js('return window.copied[0];'), /\bHOST\b/);
+  // A value that a shell or SQL would read as more than a value is marked, and the last good one holds.
+  for (const bad of ['db-1; reboot', '$(id)', '-oProxyCommand=x', "x' OR '1", 'a b', 'db-1--x']) {
+    assert.equal(await js(`const i = document.querySelector('input[data-p=HOST]'); i.value = ${JSON.stringify(bad)}; i.dispatchEvent(new Event('input')); return i.hasAttribute('aria-invalid');`), true, bad);
+  }
+  assert.deepEqual(await js("return [...new Set([...document.querySelectorAll('var[data-p=HOST]')].map((v) => v.textContent))];"), ['db-1']);
+  assert.equal(await js("const i = document.querySelector('input[data-p=HOST]'); i.value = 'db-1'; i.dispatchEvent(new Event('input')); return i.hasAttribute('aria-invalid');"), false);
 
   // A pin puts a copy of the row at the top; a note shows on both; the link names the entry's anchor.
   await page.click(`[id="${pinned}"] [data-act=pin]`);
@@ -177,8 +183,18 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
 
   await js("document.querySelector('#wipe').click(); return true;");
   assert.equal(await js("return document.querySelectorAll('#pinned-list .r').length;"), 1, 'one click arms, it does not delete');
-  await js("document.querySelector('#wipe').click(); return true;");
-  await until(page, "document.querySelectorAll('#pinned-list .r, #mine-list .r, .note').length === 0", 'the wipe');
+  // A double-click, a quick second click and a held Enter are not a yes; a plain Enter after a pause is.
+  await js("const w = document.querySelector('#wipe'); w.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); w.click(); return true;");
+  await delay(700);
+  await js("document.querySelector('#setup').showPopover(); document.querySelector('#wipe').focus(); return document.activeElement.id === 'wipe';");
+  const enter = async (autoRepeat) => {
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  };
+  await enter(true);
+  assert.equal(await js("return document.querySelectorAll('#pinned-list .r').length;"), 1, 'a double-click, a quick second click or a held Enter does not delete');
+  await enter(false);
+  await until(page,"document.querySelectorAll('#pinned-list .r, #mine-list .r, .note').length === 0", 'the wipe');
   assert.equal(await js("return document.querySelector('var[data-p=HOST]').textContent;"), 'HOST');
   assert.equal(await js("return document.querySelector('#data-sum').textContent;"), 'Nothing saved yet.');
 
@@ -203,7 +219,7 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
       notes: [...file.notes, { id: 'ok-id', text: 42 }],
       entries: [...file.entries, { id: 'mine-0123456789abcdef', kind: 'cmd', code: '<img src=x onerror="window.pwned=1">', text: '<script>window.pwned=1</script>' }, { id: '../x', kind: 'cmd', code: 'ls', text: '' },
         { id: 'mine-00000000000000ff', kind: 'cmd', code: 'ls \u202e~ fr- mr', text: 'reads as something else' }],
-      values: { ...file.values, PORT: '5432\u001b[2K', NOTABLANK: 'x', ['__proto__']: { polluted: true } },
+      values: { ...file.values, PORT: '5432\u001b[2K', NAME: '$(reboot)', IP: '-oProxyCommand=x', NOTABLANK: 'x', ['__proto__']: { polluted: true } },
       filters: { read: 'yes', distro: 'arch', versions: { pg: '16', oracle: '19', mysql: '8;drop' } },
     };
     // More entries than the page keeps: refused whole.
@@ -216,6 +232,20 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
     await until(page, "document.querySelector('#toast').textContent === 'Nothing imported'", 'the refused import');
     assert.match(await js('return window.asked;'), /HOST = db-1/);
     assert.doesNotMatch(await js('return window.asked;'), /PORT/, 'a value with hidden characters is dropped before the question');
+    assert.doesNotMatch(await js('return window.asked;'), /reboot|ProxyCommand/, 'a value a shell would run or read as an option is dropped');
+    // The one question lists everything the file brings: entries with their code, notes and pins.
+    assert.match(await js('return window.asked;'), /Entries: 2 added, 0 of yours replaced[^]*ssh HOST tail -f[^]*Notes: 1 added, 0 of yours replaced[^]*1 pin added/);
+    // Never a cut line: every line of a listed entry shows whole, a long run of blanks is counted, and what does not
+    // fit is named.
+    const long = { app: 'server-triage', format: 1, entries: [
+      { id: 'mine-00000000000000a1', kind: 'cmd', code: `echo 1\necho 2\necho 3\necho 4 zqlast\n${'x'.repeat(130)} zqtail\nls${' '.repeat(40)}zqhid`, text: '' },
+      { id: 'mine-00000000000000a2', kind: 'cmd', code: `echo ${'y'.repeat(2000)}`, text: '' },
+      { id: 'mine-00000000000000a3', kind: 'cmd', code: `echo ${'z'.repeat(2000)}`, text: '' }] };
+    await js('window.asked = null; return true;');
+    await put('long.json', JSON.stringify(long));
+    await until(page, 'window.asked !== null', 'the question on a long file');
+    const asked = await js('return window.asked;');
+    for (const part of ['zqlast', `${'x'.repeat(130)} zqtail`, 'ls [40 blanks] zqhid', '1 more entry does not fit here']) assert.ok(asked.includes(part), part);
     assert.equal(await js("return document.querySelectorAll('#mine-list .r').length;"), 0, 'a refused import changes nothing');
     await js('window.confirm = (m) => { window.asked = m; return true; }; return true;');
     await put('export.json', JSON.stringify(hostile));
@@ -227,6 +257,8 @@ test('your values, pins, notes, entries and filters work, survive a reload, and 
     assert.equal(await js("return document.querySelector('var[data-p=PORT]').textContent;"), 'PORT');
     assert.equal(await js("return document.querySelectorAll('.note').length;"), 2);
     assert.deepEqual(await js("return [document.querySelector('#f-read').checked, document.querySelector('#f-distro').value, document.querySelector('input[data-engine=pg]').value];"), [false, '', '16']);
+    await put('again.json', JSON.stringify(hostile));
+    await until(page, "document.querySelector('#toast').textContent === 'Nothing new in that file'", 'the same file a second time');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -266,6 +298,33 @@ test('search knows synonyms and highlights, the keyboard walks the results, and 
   assert.equal(await page.evaluate("document.querySelector(':target').id"), id);
   await page.evaluate("location.hash = 'postgresql-000000'; true");
   await until(page, "location.hash === '#postgresql'", 'the fallback to the section');
+
+  // A letter whose lower case is longer (U+0130) shifts the offsets of a match after it: the search must not throw.
+  await page.evaluate("(() => { document.querySelector('#add-entry').click(); const f = document.querySelector('#mine-form'); f.elements.code.value = 'zqv-run'; f.elements.text.value = 'İİİ zqv'; f.requestSubmit(); return true; })()");
+  await page.click('#q');
+  await page.type('zqv');
+  assert.ok((await page.evaluate(`${SHOWN}.map((e) => e.textContent)`)).some((t) => t.includes('zqv-run')), 'the entry with U+0130 is found');
+  assert.deepEqual(page.errors, []);
+});
+
+test('after a failed load, a change never overwrites what is stored', { skip, timeout }, async () => {
+  const page = await browser.page();
+  assert.ok(await page.goto(pathToFileURL(join(root, 'index.html')).href), 'the page script never ran');
+  const js = (expression) => page.evaluate(`(() => { ${expression} })()`);
+  const set = (p, v) => js(`const i = document.querySelector('input[data-p=${p}]'); i.value = '${v}'; i.dispatchEvent(new Event('input')); return true;`);
+  const settled = () => page.evaluate("new Promise((ok) => { const o = indexedDB.open('server-triage'); o.onsuccess = () => { const t = o.result.transaction('prefs'); t.oncomplete = () => { o.result.close(); ok(true); }; t.objectStore('prefs').get('values'); }; })");
+  await set('HOST', 'db-2');
+  await set('PORT', '6379');
+  await settled();
+  // The next load fails (a database that cannot be read), and a value is typed: it must not replace the stored ones.
+  const { identifier } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: "IDBObjectStore.prototype.getAll = function () { throw new Error('test: no load'); };" });
+  assert.ok(await page.reload(), 'after a reload, the page script never ran');
+  assert.equal(await js("return document.querySelector('#store-note').hidden;"), false, 'Setup says nothing is kept');
+  await set('HOST', 'db-3');
+  await settled();
+  await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
+  assert.ok(await page.reload(), 'after a reload, the page script never ran');
+  assert.deepEqual(await js("return ['HOST', 'PORT'].map((p) => document.querySelector(`input[data-p=${p}]`).value);"), ['db-2', '6379']);
   assert.deepEqual(page.errors, []);
 });
 

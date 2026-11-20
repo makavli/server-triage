@@ -4143,19 +4143,19 @@ Recursion without an end, or a very large `apply` or spread of an array. The tra
 py-spy dump --pid PID
 ```
 
-Every thread's current stack without stopping or editing the program, like a thread dump. `active+gil` is the thread running Python code; `idle` threads wait. It needs ptrace rights: run it as the same user or root. Add `--locals` for variable values, and `--nonblocking` to avoid pausing the process. Install: `pip install py-spy`.
+Every thread's current stack without editing the program, like a thread dump. `active+gil` is the thread running Python code; `idle` threads wait. By default it pauses the process while it reads the stacks; add `--nonblocking` to never pause it, at the cost of an occasional torn stack. It needs ptrace rights: run it as the same user or root. Add `--locals` for variable values. Install: `pip install py-spy`.
 
 ```sh
 py-spy top --pid PID
 ```
 
-A live view of where the time goes by function, like `top`. It needs a terminal: in a container use `docker exec -it`. Without a terminal it fails with "Not a tty".
+A live view of where the time goes by function, like `top`. It pauses the process for every sample, 100 a second by default: add `--nonblocking` on a busy production process. It needs a terminal: in a container use `docker exec -it`. Without a terminal it fails with "Not a tty".
 
 ```sh
 py-spy record --pid PID --duration 30 --format raw -o /tmp/py.txt
 ```
 
-Samples for 30 seconds into folded stacks (one per line, with a count), ready for a flame graph tool. Leave `--format raw` out to write an SVG flame graph. The heaviest stacks are on the lines with the largest numbers.
+Samples for 30 seconds into folded stacks (one per line, with a count), ready for a flame graph tool. Like `top`, it pauses the process for every sample unless you add `--nonblocking`. Leave `--format raw` out to write an SVG flame graph. The heaviest stacks are on the lines with the largest numbers.
 
 ```sh
 PYTHONFAULTHANDLER=1 python app.py
@@ -5545,10 +5545,15 @@ On the publisher, for a logical slot lost to `max_slot_wal_keep_size`. PostgreSQ
 
 ```sql changes
 SELECT pg_wal_replay_pause();
+```
+
+On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, `pg_get_wal_replay_pause_state()` says `paused` and the lag grows. Always resume afterwards.
+
+```sql changes
 SELECT pg_wal_replay_resume();
 ```
 
-On a standby: pauses and resumes replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, `pg_get_wal_replay_pause_state()` says `paused` and the lag grows. Always resume afterwards.
+Resumes replay on a paused standby, which then catches up on the WAL it received meanwhile.
 
 ```sql danger
 SELECT pg_promote();
@@ -7635,10 +7640,10 @@ redis-cli CLIENT INFO
 The same fields, for your own connection only: the user, the db and the address the server sees.
 
 ```sh changes
-redis-cli CLIENT KILL ID ID
+redis-cli CLIENT KILL id ID
 ```
 
-Closes the connection with that **id**, taken from `CLIENT LIST`. It answers 1 if it found one and 0 if not. A well-behaved client reconnects, so fix the cause too. `CLIENT KILL TYPE pubsub` closes every subscriber.
+Closes the connection with that **id**, taken from `CLIENT LIST`. The keyword `id` is in lower case so that only the number is a blank. It answers 1 if it found one and 0 if not. A well-behaved client reconnects, so fix the cause too. `CLIENT KILL TYPE pubsub` closes every subscriber.
 
 ```sh
 redis-cli CONFIG GET client-output-buffer-limit
@@ -7692,7 +7697,7 @@ MISCONF Redis is configured to save RDB snapshots, but it's currently unable to 
 
 The background save failed: disk full, permissions, a read-only filesystem, or the fork was refused memory (set `vm.overcommit_memory = 1`). The log has the cause, such as `Failed opening the temp RDB file ... Read-only file system`. Writes are refused until a save succeeds. Valkey says "Valkey is configured".
 
-```sh changes
+```sh danger
 redis-cli CONFIG SET stop-writes-on-bgsave-error no
 ```
 
@@ -7780,11 +7785,16 @@ printf 'SET triage:wait 1\nWAIT 1 1000\nDEL triage:wait\n' | redis-cli -h HOST
 The write and the WAIT must share one connection, so this writes a probe key `triage:wait`, waits, and deletes it. The number is the replicas that acknowledged the write within 1 second (0 = behind or down). It makes a write safer, but it is not a guarantee of durability.
 
 ```sh danger
-redis-cli REPLICAOF NO ONE
+redis-cli -h HOST REPLICAOF NO ONE
+```
+
+Promotes the replica at HOST to primary. Promoting by hand next to Sentinel or Cluster causes split-brain: stop the old primary first, and prefer `SENTINEL failover`.
+
+```sh danger
 redis-cli -h HOST REPLICAOF IP PORT
 ```
 
-Promotes a replica to primary; the second line points the node at HOST to the primary at IP. Pointing a node at a primary throws away its dataset for a full resync, and promoting by hand next to Sentinel or Cluster causes split-brain. Stop the old primary first; prefer `SENTINEL failover`.
+Points the node at HOST to the primary at IP. It throws away the node's dataset for a full resync, so check which node HOST is before you run it.
 
 ```text
 MASTERDOWN Link with MASTER is down and replica-serve-stale-data is set to 'no'.
@@ -7986,7 +7996,7 @@ A plain client talked to a TLS port. The server log says `Error accepting a clie
 redis-cli --tls --cacert /etc/redis/tls/ca.crt --cert /etc/redis/tls/client.crt --key /etc/redis/tls/client.key CONFIG GET 'tls-*'
 ```
 
-The TLS settings the server runs with. Set `tls-port`, `tls-cert-file`, `tls-key-file` and `tls-ca-cert-file` in the config; files, ciphers and protocols show here, and the `tls-cluster` and `tls-replication` switches. Both of those stay `no` unless you set them. A replica that cannot reach a TLS primary usually lacks `tls-replication yes`.
+The TLS settings the server runs with. Set `tls-port`, `tls-cert-file`, `tls-key-file` and `tls-ca-cert-file` in the config; files, ciphers and protocols show here, and the `tls-cluster` and `tls-replication` switches. Both of those stay `no` unless you set them. A replica that cannot reach a TLS primary usually lacks `tls-replication yes`. If the key has a passphrase, `tls-key-file-pass` and `tls-client-key-file-pass` print here in clear: remove them before you paste the output anywhere.
 
 ### Redis errors
 
@@ -8320,10 +8330,15 @@ sh.getBalancerState()
 
 ```js changes
 sh.stopBalancer()
+```
+
+Stops the balancer, for a backup or upgrade. A migration in progress finishes first. Do not forget to start it again: the shards drift apart while it is off.
+
+```js changes
 sh.startBalancer()
 ```
 
-Stops the balancer, for a backup or upgrade, then starts it again. A migration in progress finishes first. Do not forget to start it again: the shards drift apart while it is off. `sh.getBalancerState()` says which state it is in.
+Starts the balancer again after a backup or upgrade. `sh.getBalancerState()` says which state it is in.
 
 ```js
 db.getSiblingDB("config").chunks.find({jumbo: true})

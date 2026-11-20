@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { HIDDEN } from '../tools/build.mjs';
 import { notes } from '../tools/release-notes.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -80,7 +81,7 @@ test('no machine left a trace: no home folders, public addresses, e-mails or key
   for (const file of all.filter((f) => !f.endsWith('.png') && f !== 'tests/repo.test.mjs')) { // this file holds the pattern itself
     for (const line of text(file).split('\n')) {
       assert.ok(!traces.test(line), `${file}: ${line.trim().slice(0, 120)}`);
-      assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(line.replace(/\r$/, '')), `${file}: a hidden character (control, zero-width or bidi) in ${line.trim().slice(0, 60)}`);
+      assert.ok(!HIDDEN.test(line.replace(/\r$/, '')), `${file}: a hidden character (a control, a format or bidi mark, an unusual space) in ${line.trim().slice(0, 60)}`);
       for (const [ip] of line.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g)) assert.ok(exampleAddress(ip), `${file}: a public address ${ip}`);
     }
   }

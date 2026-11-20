@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { CACHED, HOPS, PLACEHOLDERS, SHORT, build, entryId, inline, parse, render, slug, worker } from '../tools/build.mjs';
+import { CACHED, HIDDEN, HOPS, PLACEHOLDERS, SHORT, build, entryId, inline, parse, render, slug, worker } from '../tools/build.mjs';
 import { ICONS, png, svg } from '../tools/icons.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -141,6 +141,25 @@ test('every entry has an anchor from its section and its code, and the same code
   const ids = doc.sections.flatMap((s) => s.groups).filter((g) => g.kind === 'rows').flatMap((g) => g.items).map((it) => it.id);
   assert.equal(new Set(ids).size, ids.length, 'two entries share an anchor');
   for (const id of ids) assert.ok(index.includes(` id="${id}" `), `${id} is not in the page`);
+});
+
+test('one hidden-character class, in the build and the page: unusual spaces, format marks and ignorables too', () => {
+  assert.ok(text('src/app.js').includes(`const IN_CODE = /${HIDDEN.source}/gu;`), 'src/app.js IN_CODE differs from build.mjs HIDDEN');
+  // NBSP, soft hyphen, CGJ, Arabic letter mark, Mongolian vowel separator, en quad, zero-width space, RLO, narrow NBSP,
+  // LRI, inhibit symmetric swapping, Braille blank, ideographic space, Hangul filler, variation selector 16, a tag letter.
+  for (const c of [0xa0, 0xad, 0x34f, 0x61c, 0x180e, 0x2000, 0x200b, 0x202e, 0x202f, 0x2066, 0x206a, 0x2800, 0x3000, 0x3164, 0xfe0f, 0xe0041, 0x7f]) {
+    assert.ok(HIDDEN.test(`a${String.fromCodePoint(c)}b`), `U+${c.toString(16)} passes`);
+    assert.throws(() => sheet(`\`\`\`sh\nls${String.fromCodePoint(c)}\n\`\`\`\n\nLists.\n`), /:8: a hidden character/, `U+${c.toString(16)}`);
+  }
+  for (const s of ['a b', 'a\tb', 'a\nb', 'café', 'İstanbul', 'λ']) assert.ok(!HIDDEN.test(s), JSON.stringify(s));
+});
+
+test('a block that undoes itself, or a keyword spelled like a blank, fails at its line', () => {
+  assert.throws(() => sheet('```js changes\nsh.stopBalancer()\nsh.startBalancer()\n```\n\nStops, then starts.\n'), /:7: both halves of a switch/);
+  assert.throws(() => sheet('```sh danger\nredis-cli REPLICAOF NO ONE\nredis-cli -h HOST REPLICAOF IP PORT\n```\n\nPromotes.\n'), /:7: both halves of a switch/);
+  assert.throws(() => sheet('```sh changes\nredis-cli CLIENT KILL ID ID\n```\n\nCloses.\n'), /:7: "ID ID": a keyword/);
+  assert.throws(() => sheet('```sh changes\necho NOT NOT then KILL ID ID\n```\n\nCloses.\n'), /:7: "ID ID": a keyword/, 'every pair on a line is checked');
+  assert.doesNotThrow(() => sheet('```sh changes\nredis-cli CLIENT KILL id ID\n```\n\nCloses.\n\n```sh danger\nredis-cli -h HOST REPLICAOF NO ONE\n```\n\nPromotes.\n'));
 });
 
 test('a row carries its tags as data and as badges, and its blanks as fields', () => {
