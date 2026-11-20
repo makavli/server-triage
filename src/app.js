@@ -70,11 +70,17 @@
   const list = (v) => (Array.isArray(v) ? v.slice(0, 5000) : []);
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
   const time = (v) => (Number.isFinite(v) ? v : Date.now());
-  // Characters a screen hides or reorders (controls, zero-width and bidi marks): the command you paste must be the one
-  // you read. A file that holds them is refused and typing drops them; a value is one line, so tab and newline too.
-  const IN_CODE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
-  const IN_VALUE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+  // Characters a screen hides or reorders (controls, format and bidi marks, spaces that are not the plain one, the
+  // default-ignorables, the Braille blank): the command you paste must be the one you read. A file that holds them is
+  // refused and typing drops them; a value is one line, so tab and newline too. It is the build's HIDDEN (a test checks).
+  const IN_CODE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/gu;
+  const IN_VALUE = new RegExp(`${IN_CODE.source}|[\t\n]`, 'gu');
   const shown = (v, max, re) => str(v, max) && v.replace(re, '') === v;
+  // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, and
+  // no leading - that a command would read as an option. Ports and process IDs are digits.
+  const SAFE = /^(?!-)[\w.:/@+=,%-]{1,200}$/;
+  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/ };
+  const fits = (k, v) => (FORMS[k] ?? SAFE).test(v);
   const MAX_ENTRIES = 1000;
   function clean(raw) {
     const o = obj(raw);
@@ -86,7 +92,7 @@
       entries: list(o.entries)
         .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && str(e.text ?? '', 4000))
         .map((e) => ({ id: e.id, kind: e.kind, code: e.code, text: e.text ?? '', at: time(e.at) })),
-      values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && shown(v, 200, IN_VALUE) && v.trim())),
+      values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && str(v, 200) && fits(k, v))),
       filters: {
         read: f.read === true,
         distro: ['deb', 'rhel'].includes(f.distro) ? f.distro : '',
@@ -109,6 +115,7 @@
       const all = await Promise.race([db.all(), new Promise((_, no) => { setTimeout(() => no(new Error('no answer')), 4000); })]);
       const pref = (id) => all.prefs.find((p) => p.id === id)?.value;
       adopt(clean({ ...all, values: pref('values'), filters: pref('filters') }));
+      loaded = true;
     } catch {
       state.kept = false;
     }
@@ -124,7 +131,10 @@
       if (!persisted) { persisted = true; navigator.storage?.persist?.().catch(() => {}); } // ask once not to be evicted
     }).catch(() => { state.kept = false; summary(); });
   }
-  const savePref = (id) => keep(db.put('prefs', { id, value: state[id] }));
+  // A pref is one whole record: written before a load succeeded, it would replace the stored values or filters.
+  // shortcut: what is typed before the first load answers is shown but not kept; queue it if that ever matters.
+  let loaded = false;
+  const savePref = (id) => { if (loaded) keep(db.put('prefs', { id, value: state[id] })); };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Rows: the actions each one gets, drawn icons, and the key a row answers to (a pinned copy points at its original).
@@ -390,6 +400,7 @@
       });
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
         const t = n.data.toLowerCase();
+        if (t.length !== n.data.length) continue; // a letter whose lower case is longer (İ) would shift the marks: not painted
         for (const w of needles) {
           for (let i = t.indexOf(w); i >= 0; i = t.indexOf(w, i + w.length)) {
             const r = new Range();
@@ -531,9 +542,11 @@
     area.focus();
   }
 
-  // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way.
-  function armed(b, ask, act) {
+  // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way. A double-click
+  // or a quick second click is one act, not a yes, so the second click counts only after a pause; a held key is below.
+  function armed(b, e, ask, act) {
     if (b.dataset.armed) {
+      if (e.detail > 1 || performance.now() - Number(b.dataset.at) < 600) return;
       clearTimeout(Number(b.dataset.armed));
       delete b.dataset.armed;
       act();
@@ -546,9 +559,12 @@
       if (label) b.setAttribute('aria-label', label);
       if (text) b.textContent = text;
     }, 4000));
+    b.dataset.at = String(performance.now());
     if (text) b.textContent = ask; else b.setAttribute('aria-label', ask);
     say(ask);
   }
+  // A held Enter repeats its click: on an armed button, the repeats are not a second click.
+  document.addEventListener('keydown', (e) => { if (e.repeat && e.target.matches?.('[data-armed]')) e.preventDefault(); });
 
   document.addEventListener('click', (e) => {
     const code = e.target.closest?.('.r > code');
@@ -563,7 +579,7 @@
     else if (act === 'link') copyLink(id);
     else if (act === 'edit') openForm(state.entries.get(id));
     else if (act === 'remove') {
-      armed(b, 'Click again to delete this entry', () => {
+      armed(b, e, 'Click again to delete this entry', () => {
         state.entries.delete(id);
         keep(db.del('entries', id));
         render();
@@ -619,6 +635,9 @@
   for (const input of $$('input[data-p]', setup)) {
     input.addEventListener('input', () => {
       const v = input.value.replace(IN_VALUE, '').trim();
+      const ok = !v || fits(input.dataset.p, v);
+      input.toggleAttribute('aria-invalid', !ok);
+      if (!ok) { say('A value takes letters, digits and . _ : / @ + = , % -'); return; } // the last good one holds
       if (v) state.values[input.dataset.p] = v; else delete state.values[input.dataset.p];
       fill();
       summary();
@@ -676,7 +695,8 @@
 
   // An import adds what the file holds: pins join yours, and a note, an entry or a value with the same name replaces
   // yours. The file is checked before anything is written, and it is written in one go or not at all. A file can come
-  // from someone else, so values that would go into every command, new filters and replaced notes are asked about first.
+  // from someone else, so one question lists everything it would change first: entries with their code, notes, pins,
+  // values and filters.
   const importer = $('#import');
   importer.addEventListener('change', async () => {
     const file = importer.files?.[0];
@@ -696,16 +716,30 @@
       say(`That file would take you past ${MAX_ENTRIES} entries`);
       return;
     }
+    const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
     const values = Object.entries(c.values).filter(([k, v]) => state.values[k] !== v);
     const filters = raw.filters !== undefined && JSON.stringify(c.filters) !== JSON.stringify(state.filters);
-    const replaced = c.notes.filter((x) => state.notes.has(x.id) && state.notes.get(x.id) !== x.text).length;
-    if (values.length || filters || replaced) {
-      const ask = [`Import ${file.name}?`];
-      if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
-      if (filters) ask.push('', "Your filters are replaced by the file's.");
-      if (replaced) ask.push('', `${replaced} of your notes are replaced.`);
-      if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
+    const pins = c.pins.filter((p) => !state.pins.has(p.id)).length;
+    const notes = c.notes.filter((x) => state.notes.get(x.id) !== x.text);
+    const newNotes = notes.filter((x) => !state.notes.has(x.id)).length;
+    const same = (a, b) => a && a.kind === b.kind && a.code === b.code && a.text === b.text;
+    const entries = c.entries.filter((e) => !same(state.entries.get(e.id), e));
+    const newEntries = entries.filter((e) => !state.entries.has(e.id)).length;
+    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say('Nothing new in that file'); return; }
+    const ask = [`Import ${file.name}?`];
+    if (entries.length) {
+      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. They copy as written:`);
+      for (const e of entries.slice(0, 10)) {
+        const lines = e.code.split('\n');
+        ask.push(...lines.slice(0, 3).map((l) => `  ${l.length > 120 ? `${l.slice(0, 120)}...` : l}`), ...(lines.length > 3 ? ['  ...'] : []));
+      }
+      if (entries.length > 10) ask.push(`  and ${n(entries.length - 10, 'more entry', 'more entries')}`);
     }
+    if (notes.length) ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced.`);
+    if (pins) ask.push('', `${n(pins, 'pin', 'pins')} added.`);
+    if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
+    if (filters) ask.push('', "Your filters are replaced by the file's.");
+    if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
     for (const p of c.pins) if (!state.pins.has(p.id)) state.pins.set(p.id, p.at);
     for (const n of c.notes) state.notes.set(n.id, n.text);
     for (const e of c.entries) state.entries.set(e.id, e);
@@ -715,17 +749,18 @@
       for (const p of c.pins) s('pins').put({ id: p.id, at: state.pins.get(p.id) });
       for (const n of c.notes) s('notes').put(n);
       for (const e of c.entries) s('entries').put(e);
-      s('prefs').put({ id: 'values', value: state.values });
-      s('prefs').put({ id: 'filters', value: state.filters });
+      if (loaded) { // after a failed load, the whole records would replace what is stored
+        s('prefs').put({ id: 'values', value: state.values });
+        s('prefs').put({ id: 'filters', value: state.filters });
+      }
     }));
     showSetup();
     render();
-    const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
     say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}`);
   });
 
   $('#wipe').addEventListener('click', (e) => {
-    armed(e.currentTarget, 'Click again to delete it all', () => {
+    armed(e.currentTarget, e, 'Click again to delete it all', () => {
       adopt(clean({}));
       keep(db.batch((s) => { for (const name of ['pins', 'notes', 'entries', 'prefs']) s(name).clear(); }));
       showSetup();

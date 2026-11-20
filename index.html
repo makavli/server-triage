@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-y9gSSiCytx9DmZdny5Cuz4XnrzTRYsEAblX32xaY+Xs='; style-src 'sha256-zFpBWP/sBovPMUWXhMxrJtDjAJYBpNKyRzseeARAYh0='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-A2f2mcd/BW3kAya/QA/DGHbjgN6NM309F6JGr9xD79w='; style-src 'sha256-zFpBWP/sBovPMUWXhMxrJtDjAJYBpNKyRzseeARAYh0='; img-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types triage">
 <title>Server Triage Sheet</title>
 <meta name="description" content="Commands and error meanings for a broken host, service or database.">
 <meta name="color-scheme" content="light dark">
@@ -1285,9 +1285,9 @@ jcmd <var data-p="PID">PID</var> VM.command_line</code><div class="m"><p>The fla
 <div class="r x" id="app-runtimes-jvm-nodejs-python-go-55474b" data-in="App runtimes: JVM, Node.js, Python, Go Node.js errors"><code class="k">RangeError: Maximum call stack size exceeded</code><div class="m"><p>Recursion without an end, or a very large <code>apply</code> or spread of an array. The trace shows the same function repeating. It is a normal, catchable error in the process, not a crash.</p></div></div>
 </div></div>
 <div class="grp"><h3>Python</h3><div class="t">
-<div class="r" id="app-runtimes-jvm-nodejs-python-go-dbc571" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy dump --pid <var data-p="PID">PID</var></code><div class="m"><p>Every thread's current stack without stopping or editing the program, like a thread dump. <code>active+gil</code> is the thread running Python code; <code>idle</code> threads wait. It needs ptrace rights: run it as the same user or root. Add <code>--locals</code> for variable values, and <code>--nonblocking</code> to avoid pausing the process. Install: <code>pip install py-spy</code>.</p></div></div>
-<div class="r" id="app-runtimes-jvm-nodejs-python-go-5e37f0" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy top --pid <var data-p="PID">PID</var></code><div class="m"><p>A live view of where the time goes by function, like <code>top</code>. It needs a terminal: in a container use <code>docker exec -it</code>. Without a terminal it fails with &quot;Not a tty&quot;.</p></div></div>
-<div class="r" id="app-runtimes-jvm-nodejs-python-go-631ae3" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy record --pid <var data-p="PID">PID</var> --duration 30 --format raw -o /tmp/py.txt</code><div class="m"><p>Samples for 30 seconds into folded stacks (one per line, with a count), ready for a flame graph tool. Leave <code>--format raw</code> out to write an SVG flame graph. The heaviest stacks are on the lines with the largest numbers.</p></div></div>
+<div class="r" id="app-runtimes-jvm-nodejs-python-go-dbc571" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy dump --pid <var data-p="PID">PID</var></code><div class="m"><p>Every thread's current stack without editing the program, like a thread dump. <code>active+gil</code> is the thread running Python code; <code>idle</code> threads wait. By default it pauses the process while it reads the stacks; add <code>--nonblocking</code> to never pause it, at the cost of an occasional torn stack. It needs ptrace rights: run it as the same user or root. Add <code>--locals</code> for variable values. Install: <code>pip install py-spy</code>.</p></div></div>
+<div class="r" id="app-runtimes-jvm-nodejs-python-go-5e37f0" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy top --pid <var data-p="PID">PID</var></code><div class="m"><p>A live view of where the time goes by function, like <code>top</code>. It pauses the process for every sample, 100 a second by default: add <code>--nonblocking</code> on a busy production process. It needs a terminal: in a container use <code>docker exec -it</code>. Without a terminal it fails with &quot;Not a tty&quot;.</p></div></div>
+<div class="r" id="app-runtimes-jvm-nodejs-python-go-631ae3" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">py-spy record --pid <var data-p="PID">PID</var> --duration 30 --format raw -o /tmp/py.txt</code><div class="m"><p>Samples for 30 seconds into folded stacks (one per line, with a count), ready for a flame graph tool. Like <code>top</code>, it pauses the process for every sample unless you add <code>--nonblocking</code>. Leave <code>--format raw</code> out to write an SVG flame graph. The heaviest stacks are on the lines with the largest numbers.</p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-7010a2" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">PYTHONFAULTHANDLER=1 python app.py</code><div class="m"><p>Turns on <code>faulthandler</code>: a crash from a segfault, an abort or a C extension prints every thread's Python stack to stderr, &quot;Fatal Python error: Segmentation fault&quot;. In code, <code>faulthandler.register(signal.SIGUSR1)</code> dumps all stacks on <code>kill -USR1 PID</code>, and <code>faulthandler.dump_traceback_later(30, repeat=True)</code> dumps a hung process on a timer.</p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-44c464" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">python -X tracemalloc=5 app.py</code><div class="m"><p>Tracks every allocation with 5 frames of stack; it costs memory and speed, so use it in a test. In code, <code>tracemalloc.take_snapshot().statistics('lineno')[:5]</code> prints lines such as <code>app.py:3: size=19.9 MiB, count=20001, average=1042 B</code>. Compare two snapshots with <code>snapshot.compare_to(old, 'lineno')</code>.</p></div></div>
 <div class="r" id="app-runtimes-jvm-nodejs-python-go-99f494" data-in="App runtimes: JVM, Node.js, Python, Go Python"><code class="k">PYTHONUNBUFFERED=1 python app.py</code><div class="m"><p>Stdout and stderr are written at once, not in blocks. Without it, a Python process in a container or a pipe can look silent for minutes while its logs sit in a buffer. Use <code>python -u</code> for the same effect.</p></div></div>
@@ -1691,8 +1691,8 @@ CONTEXT:  processing remote data for replication origin &quot;pg_16396&quot; dur
 LOG:  waiting for WAL to become available at 0/2F23EDB0</code><div class="m"><p>On a standby that fell too far behind: the primary no longer has the WAL it needs (no slot, or the slot hit <code>max_slot_wal_keep_size</code>). It will retry forever. Rebuild it with a fresh <code>pg_basebackup</code>, or restore from archive if <code>restore_command</code> is set.</p></div></div>
 <div class="r x" id="postgresql-6f99e3" data-in="PostgreSQL Replication"><code class="k">ERROR:  can no longer get changes from replication slot &quot;sub1&quot;
 DETAIL:  This slot has been invalidated because it exceeded the maximum reserved size.</code><div class="m"><p>On the publisher, for a logical slot lost to <code>max_slot_wal_keep_size</code>. PostgreSQL 18 says &quot;can no longer access replication slot&quot;, with the reason <code>wal_removed</code>. The subscription cannot resume: recreate it (<code>DROP SUBSCRIPTION</code> then <code>CREATE SUBSCRIPTION</code>, with <code>copy_data</code> chosen on purpose) and raise the limit or fix the stalled consumer.</p></div></div>
-<div class="r" id="postgresql-7bacde" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_pause();
-SELECT pg_wal_replay_resume();</code><div class="m"><p>On a standby: pauses and resumes replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, <code>pg_get_wal_replay_pause_state()</code> says <code>paused</code> and the lag grows. Always resume afterwards.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-995b21" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_pause();</code><div class="m"><p>On a standby: pauses replay while WAL keeps arriving. Use it to read a stable snapshot, or to stop a bad change from being applied. While paused, <code>pg_get_wal_replay_pause_state()</code> says <code>paused</code> and the lag grows. Always resume afterwards.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="postgresql-122007" data-in="PostgreSQL Replication" data-tags="changes"><code class="k">SELECT pg_wal_replay_resume();</code><div class="m"><p>Resumes replay on a paused standby, which then catches up on the WAL it received meanwhile.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="postgresql-f3f71e" data-in="PostgreSQL Replication" data-tags="danger"><code class="k">SELECT pg_promote();</code><div class="m"><p>On a standby: makes it a primary. It cannot be undone, and the old primary must be fixed or rebuilt, never left running, or you get two primaries. Prefer Patroni's switchover if you use it. Check the old primary is down first.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Failover with Patroni</h3><div class="t">
@@ -2216,7 +2216,7 @@ redis-cli SSCAN <var data-p="KEYNAME">KEYNAME</var> 0 COUNT 100</code><div class
 <div class="r" id="redis-3ff9af" data-in="Redis Clients"><code class="k">redis-cli CLIENT LIST | awk '{for(i=1;i&lt;=NF;i++){split($i,a,&quot;=&quot;);v[a[1]]=a[2]} print v[&quot;omem&quot;], v[&quot;addr&quot;], v[&quot;cmd&quot;], v[&quot;name&quot;]}' | sort -rn | head</code><div class="m"><p>The connections with the biggest output buffers first. A large <b>omem</b> is a client that reads too slowly: a stuck subscriber, a replica behind, a script that asked for a huge reply.</p></div></div>
 <div class="r" id="redis-1cc97f" data-in="Redis Clients"><code class="k">redis-cli CLIENT LIST | awk '{split($2,a,&quot;[=:]&quot;); n[a[2]]++} END{for(i in n) print n[i], i}' | sort -rn | head</code><div class="m"><p>Connections per source address. One address with hundreds is a connection leak or a missing pool. Compare with <code>connected_clients</code> and <code>maxclients</code>.</p></div></div>
 <div class="r" id="redis-e0aacf" data-in="Redis Clients"><code class="k">redis-cli CLIENT INFO</code><div class="m"><p>The same fields, for your own connection only: the user, the db and the address the server sees.</p></div></div>
-<div class="r" id="redis-91e876" data-in="Redis Clients" data-tags="changes"><code class="k">redis-cli CLIENT KILL <var data-p="ID">ID</var> <var data-p="ID">ID</var></code><div class="m"><p>Closes the connection with that <b>id</b>, taken from <code>CLIENT LIST</code>. It answers 1 if it found one and 0 if not. A well-behaved client reconnects, so fix the cause too. <code>CLIENT KILL TYPE pubsub</code> closes every subscriber.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="redis-982496" data-in="Redis Clients" data-tags="changes"><code class="k">redis-cli CLIENT KILL id <var data-p="ID">ID</var></code><div class="m"><p>Closes the connection with that <b>id</b>, taken from <code>CLIENT LIST</code>. The keyword <code>id</code> is in lower case so that only the number is a blank. It answers 1 if it found one and 0 if not. A well-behaved client reconnects, so fix the cause too. <code>CLIENT KILL TYPE pubsub</code> closes every subscriber.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="redis-6df987" data-in="Redis Clients"><code class="k">redis-cli CONFIG GET client-output-buffer-limit</code><div class="m"><p>Three classes: <code>normal</code>, <code>slave</code> (a replica) and <code>pubsub</code>, each with a hard limit, a soft limit and the seconds the soft limit may be exceeded, in bytes. A client that passes the hard limit, or stays over the soft one, is closed. Normal and pub/sub buffers count against <code>maxmemory</code>; replica buffers do not but still use RAM.</p></div></div>
 <div class="r x" id="redis-a33adf" data-in="Redis Clients"><code class="k">Client id=3 addr=127.0.0.1:58276 laddr=127.0.0.1:6379 ... flags=P ... omem=114712 ... scheduled to be closed ASAP for overcoming of output buffer limits.</code><div class="m"><p>The server closed a client for an output buffer over its limit. <b>flags=P</b> is a subscriber that is too slow; <b>flags=S</b> is a replica. For a subscriber, make it read faster or publish less. For a replica, see the full resync loop under Replication.</p></div></div>
 <div class="r" id="redis-117f6f" data-in="Redis Clients"><code class="k">redis-cli CONFIG GET maxclients
@@ -2229,7 +2229,7 @@ redis-cli LASTSAVE</code><div class="m"><p>The status of RDB and AOF in one view
 <div class="r" id="redis-6bc6b4" data-in="Redis Persistence" data-tags="changes"><code class="k">redis-cli BGSAVE</code><div class="m"><p>Forks and writes a snapshot in the background. It answers <code>Background saving started</code>; poll <code>rdb_bgsave_in_progress</code> and then <code>rdb_last_bgsave_status</code>. The fork can stall clients and needs spare memory for copy-on-write.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="redis-2756fc" data-in="Redis Persistence" data-tags="changes"><code class="k">redis-cli BGREWRITEAOF</code><div class="m"><p>Rewrites the AOF into a compact form in the background. Use it when the AOF has grown huge: check the size of the <code>appendonlydir</code> folder. It forks like BGSAVE. In Redis 7 the files are in the <code>appendonlydir</code> folder: a manifest, a base file and one or more incr files.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r x" id="redis-60facf" data-in="Redis Persistence"><code class="k">MISCONF Redis is configured to save RDB snapshots, but it's currently unable to persist to disk. Commands that may modify the data set are disabled, because this instance is configured to report errors during writes if RDB snapshotting fails (stop-writes-on-bgsave-error option). Please check the Redis logs for details about the RDB error.</code><div class="m"><p>The background save failed: disk full, permissions, a read-only filesystem, or the fork was refused memory (set <code>vm.overcommit_memory = 1</code>). The log has the cause, such as <code>Failed opening the temp RDB file ... Read-only file system</code>. Writes are refused until a save succeeds. Valkey says &quot;Valkey is configured&quot;.</p></div></div>
-<div class="r" id="redis-7a120b" data-in="Redis Persistence" data-tags="changes"><code class="k">redis-cli CONFIG SET stop-writes-on-bgsave-error no</code><div class="m"><p>Lets writes through while snapshots keep failing. It hides the problem: the data is then not being saved. Use it only for minutes while you free disk, then set it back to yes and run <code>BGSAVE</code>.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="redis-7a120b" data-in="Redis Persistence" data-tags="danger"><code class="k">redis-cli CONFIG SET stop-writes-on-bgsave-error no</code><div class="m"><p>Lets writes through while snapshots keep failing. It hides the problem: the data is then not being saved. Use it only for minutes while you free disk, then set it back to yes and run <code>BGSAVE</code>.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r" id="redis-caf47c" data-in="Redis Persistence" data-tags="danger"><code class="k">redis-check-aof --fix <var data-p="DATADIR">DATADIR</var>/appendonlydir/appendonly.aof.manifest</code><div class="m"><p>Run it with Redis stopped, on a copy. It reports the bytes it cannot read, such as <code>Expected \r\n</code> and <code>diff=22</code>, and asks before it truncates the file, which drops the damaged tail. Without <code>--fix</code> it only checks. The manifest file name follows <code>appendfilename</code>. Redis 7 starts anyway after a short read if <code>aof-load-truncated</code> is yes (the default).</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 </div></div>
 <div class="grp"><h3>Replication</h3><div class="t">
@@ -2251,8 +2251,8 @@ Full resync requested by replica 172.19.0.3:6379
 Can't attach the replica to the current BGSAVE. Waiting for next BGSAVE for SYNC</code><div class="m"><p>The primary side of the same loop, repeated every few seconds, with <code>I/O error reading bulk count from MASTER</code> on the replica. Each round forks. Check <code>INFO stats</code> <code>sync_full</code> and CPU on the primary. Raise the replica buffer limit, then watch it stop.</p></div></div>
 <div class="r" id="redis-6d3023" data-in="Redis Replication" data-tags="changes"><code class="k">redis-cli CONFIG SET client-output-buffer-limit &quot;replica 512mb 128mb 60&quot;</code><div class="m"><p>Breaks the resync loop when write traffic outruns the snapshot transfer: hard limit 512 MB, soft limit 128 MB for 60 seconds. The replica buffer does not count against <code>maxmemory</code> but still uses RAM (replicas share one buffer since Redis 7.0), so leave headroom. Also lower the write rate during the sync if you can.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="redis-c6b737" data-in="Redis Replication" data-tags="changes"><code class="k">printf 'SET triage:wait 1\nWAIT 1 1000\nDEL triage:wait\n' | redis-cli -h <var data-p="HOST">HOST</var></code><div class="m"><p>The write and the WAIT must share one connection, so this writes a probe key <code>triage:wait</code>, waits, and deletes it. The number is the replicas that acknowledged the write within 1 second (0 = behind or down). It makes a write safer, but it is not a guarantee of durability.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
-<div class="r" id="redis-4d651c" data-in="Redis Replication" data-tags="danger"><code class="k">redis-cli REPLICAOF NO ONE
-redis-cli -h <var data-p="HOST">HOST</var> REPLICAOF <var data-p="IP">IP</var> <var data-p="PORT">PORT</var></code><div class="m"><p>Promotes a replica to primary; the second line points the node at HOST to the primary at IP. Pointing a node at a primary throws away its dataset for a full resync, and promoting by hand next to Sentinel or Cluster causes split-brain. Stop the old primary first; prefer <code>SENTINEL failover</code>.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
+<div class="r" id="redis-f8057c" data-in="Redis Replication" data-tags="danger"><code class="k">redis-cli -h <var data-p="HOST">HOST</var> REPLICAOF NO ONE</code><div class="m"><p>Promotes the replica at HOST to primary. Promoting by hand next to Sentinel or Cluster causes split-brain: stop the old primary first, and prefer <code>SENTINEL failover</code>.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
+<div class="r" id="redis-48746e" data-in="Redis Replication" data-tags="danger"><code class="k">redis-cli -h <var data-p="HOST">HOST</var> REPLICAOF <var data-p="IP">IP</var> <var data-p="PORT">PORT</var></code><div class="m"><p>Points the node at HOST to the primary at IP. It throws away the node's dataset for a full resync, so check which node HOST is before you run it.</p><p class="tags"><span class="tag t-danger">Can lose data</span></p></div></div>
 <div class="r x" id="redis-9328c0" data-in="Redis Replication"><code class="k">MASTERDOWN Link with MASTER is down and replica-serve-stale-data is set to 'no'.</code><div class="m"><p>A replica with <code>replica-serve-stale-data no</code> answers nothing while its link to the primary is down. Check <code>master_link_status</code> and the log line <code>Unable to connect to MASTER</code>: DNS, firewall, <code>masterauth</code>. Setting it to yes serves stale reads.</p></div></div>
 <div class="r" id="redis-c4ac3d" data-in="Redis Replication"><code class="k">redis-cli INFO replication | grep -E 'connected_slaves|^slave[0-9]'
 redis-cli CONFIG GET 'min-replicas-*'</code><div class="m"><p><code>min-replicas-to-write</code> and <code>min-replicas-max-lag</code> make the primary refuse writes when too few replicas are online. Writes fail with NOREPLICAS when <code>connected_slaves</code> is lower than the first, or every lag is above the second.</p></div></div>
@@ -2299,7 +2299,7 @@ redis-cli ACL LIST</code><div class="m"><p><code>ACL WHOAMI</code> is the user o
 <div class="r x" id="redis-794b12" data-in="Redis TLS"><code class="k">Could not connect to Redis at HOST:6379: SSL_connect failed: certificate verify failed</code><div class="m"><p>The client does not trust the server's certificate: wrong or missing <code>--cacert</code>, an expired or self-signed certificate. The server log says <code>tlsv1 alert unknown ca</code>. For the reason, run <code>openssl s_client -connect HOST:PORT -CAfile ca.crt</code> and read <b>Verify return code</b>, such as <code>10 (certificate has expired)</code>.</p></div></div>
 <div class="r x" id="redis-5e78ba" data-in="Redis TLS"><code class="k">Error: Server closed the connection</code><div class="m"><p>The TLS server wants a client certificate and got none, so the handshake ended. The server log says <code>peer did not return a certificate</code>. Pass <code>--cert</code> and <code>--key</code>, or check that the certificate is signed by the <code>tls-ca-cert-file</code> CA.</p></div></div>
 <div class="r x" id="redis-35a143" data-in="Redis TLS"><code class="k">Error: Connection reset by peer</code><div class="m"><p>A plain client talked to a TLS port. The server log says <code>Error accepting a client connection: error:0A00010B:SSL routines::wrong version number</code>. Add <code>--tls</code>. The reverse mistake, <code>--tls</code> on a plain port, hangs with no output: run it as <code>timeout 5 redis-cli --tls ...</code>.</p></div></div>
-<div class="r" id="redis-a7eef8" data-in="Redis TLS"><code class="k">redis-cli --tls --cacert /etc/redis/tls/ca.crt --cert /etc/redis/tls/client.crt --key /etc/redis/tls/client.key CONFIG GET 'tls-*'</code><div class="m"><p>The TLS settings the server runs with. Set <code>tls-port</code>, <code>tls-cert-file</code>, <code>tls-key-file</code> and <code>tls-ca-cert-file</code> in the config; files, ciphers and protocols show here, and the <code>tls-cluster</code> and <code>tls-replication</code> switches. Both of those stay <code>no</code> unless you set them. A replica that cannot reach a TLS primary usually lacks <code>tls-replication yes</code>.</p></div></div>
+<div class="r" id="redis-a7eef8" data-in="Redis TLS"><code class="k">redis-cli --tls --cacert /etc/redis/tls/ca.crt --cert /etc/redis/tls/client.crt --key /etc/redis/tls/client.key CONFIG GET 'tls-*'</code><div class="m"><p>The TLS settings the server runs with. Set <code>tls-port</code>, <code>tls-cert-file</code>, <code>tls-key-file</code> and <code>tls-ca-cert-file</code> in the config; files, ciphers and protocols show here, and the <code>tls-cluster</code> and <code>tls-replication</code> switches. Both of those stay <code>no</code> unless you set them. A replica that cannot reach a TLS primary usually lacks <code>tls-replication yes</code>. If the key has a passphrase, <code>tls-key-file-pass</code> and <code>tls-client-key-file-pass</code> print here in clear: remove them before you paste the output anywhere.</p></div></div>
 </div></div>
 <div class="grp"><h3>Redis errors</h3><div class="t">
 <div class="r x" id="redis-2fcd0b" data-in="Redis Redis errors"><code class="k">OOM command not allowed when used memory &gt; 'maxmemory'.</code><div class="m"><p>Full, with <code>maxmemory-policy</code> noeviction. A cache wants allkeys-lru; a datastore needs more memory. Reads still work. Client buffers count toward the limit, replica buffers do not (they still use RAM), so check <code>MEMORY STATS</code>, and <code>INFO errorstats</code> shows <code>errorstat_OOM</code>.</p></div></div>
@@ -2376,8 +2376,8 @@ db.<var data-p="COLLECTION">COLLECTION</var>.aggregate([{$indexStats:{}}])</code
 <div class="r" id="mongodb-8b9255" data-in="MongoDB Sharding"><code class="k">sh.status()</code><div class="m"><p>Run the sharding commands on a <code>mongos</code>. Shards, the active mongoses, <b>autosplit</b>, the <b>balancer</b> (enabled, running, failed rounds, migrations in 24 hours) and each sharded collection with its shard key and chunks. The balancer evens data size per shard, not chunk count, so chunk counts can differ; compare data per shard with getShardDistribution().</p></div></div>
 <div class="r" id="mongodb-9e1cd0" data-in="MongoDB Sharding"><code class="k">db.adminCommand({balancerStatus: 1})
 sh.getBalancerState()</code><div class="m"><p><b>mode</b> <code>full</code> means the balancer is on; <code>off</code> means stopped. <b>inBalancerRound</b> says it is moving chunks now. Moves cost IO on two shards, so a balancer that never rests at peak hours is a reason to set a balancer window.</p></div></div>
-<div class="r" id="mongodb-5431a5" data-in="MongoDB Sharding" data-tags="changes"><code class="k">sh.stopBalancer()
-sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or upgrade, then starts it again. A migration in progress finishes first. Do not forget to start it again: the shards drift apart while it is off. <code>sh.getBalancerState()</code> says which state it is in.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="mongodb-83a9c0" data-in="MongoDB Sharding" data-tags="changes"><code class="k">sh.stopBalancer()</code><div class="m"><p>Stops the balancer, for a backup or upgrade. A migration in progress finishes first. Do not forget to start it again: the shards drift apart while it is off.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
+<div class="r" id="mongodb-774ef8" data-in="MongoDB Sharding" data-tags="changes"><code class="k">sh.startBalancer()</code><div class="m"><p>Starts the balancer again after a backup or upgrade. <code>sh.getBalancerState()</code> says which state it is in.</p><p class="tags"><span class="tag t-changes">Changes state</span></p></div></div>
 <div class="r" id="mongodb-686867" data-in="MongoDB Sharding"><code class="k">db.getSiblingDB(&quot;config&quot;).chunks.find({jumbo: true})</code><div class="m"><p>Jumbo chunks: too large to split and so never moved. An empty result is healthy. A jumbo chunk comes from one shard key value with too much data. The fix is a better key (<code>refineCollectionShardKey</code>, or <code>reshardCollection</code> on 5.0 and later), not the balancer.</p></div></div>
 <div class="r" id="mongodb-e6c940" data-in="MongoDB Sharding"><code class="k">db.<var data-p="COLLECTION">COLLECTION</var>.getShardDistribution()</code><div class="m"><p>Data, documents and chunks per shard, with the share of each. A shard far above the others is where the load and the disk go. Run it on the sharded collection through <code>mongos</code>.</p></div></div>
 </div></div>
@@ -2475,7 +2475,7 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
   <div class="wrap">
     <p>A tag after a block's language says more: <code>changes</code> changes state, <code>danger</code> can lose data, <code>deb</code> and <code>rhel</code> name the one distribution it is for, and a version such as <code>pg16+</code> is the oldest one it runs on.</p>
     <p>Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version. Searchable, click-to-copy and offline: <a href="https://makavli.github.io/server-triage/">the app</a>.</p>
-    <p>Version 1.1.0, free under the MIT licence. Source, issues and the Markdown copy: <a href="https://github.com/makavli/server-triage">github.com/makavli/server-triage</a>.</p>
+    <p>Version 1.1.1, free under the MIT licence. Source, issues and the Markdown copy: <a href="https://github.com/makavli/server-triage">github.com/makavli/server-triage</a>.</p>
   </div>
 </footer>
 
@@ -2552,11 +2552,17 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
   const list = (v) => (Array.isArray(v) ? v.slice(0, 5000) : []);
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
   const time = (v) => (Number.isFinite(v) ? v : Date.now());
-  // Characters a screen hides or reorders (controls, zero-width and bidi marks): the command you paste must be the one
-  // you read. A file that holds them is refused and typing drops them; a value is one line, so tab and newline too.
-  const IN_CODE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
-  const IN_VALUE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+  // Characters a screen hides or reorders (controls, format and bidi marks, spaces that are not the plain one, the
+  // default-ignorables, the Braille blank): the command you paste must be the one you read. A file that holds them is
+  // refused and typing drops them; a value is one line, so tab and newline too. It is the build's HIDDEN (a test checks).
+  const IN_CODE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/gu;
+  const IN_VALUE = new RegExp(`${IN_CODE.source}|[\t\n]`, 'gu');
   const shown = (v, max, re) => str(v, max) && v.replace(re, '') === v;
+  // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, and
+  // no leading - that a command would read as an option. Ports and process IDs are digits.
+  const SAFE = /^(?!-)[\w.:/@+=,%-]{1,200}$/;
+  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/ };
+  const fits = (k, v) => (FORMS[k] ?? SAFE).test(v);
   const MAX_ENTRIES = 1000;
   function clean(raw) {
     const o = obj(raw);
@@ -2568,7 +2574,7 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       entries: list(o.entries)
         .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && str(e.text ?? '', 4000))
         .map((e) => ({ id: e.id, kind: e.kind, code: e.code, text: e.text ?? '', at: time(e.at) })),
-      values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && shown(v, 200, IN_VALUE) && v.trim())),
+      values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && str(v, 200) && fits(k, v))),
       filters: {
         read: f.read === true,
         distro: ['deb', 'rhel'].includes(f.distro) ? f.distro : '',
@@ -2591,6 +2597,7 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       const all = await Promise.race([db.all(), new Promise((_, no) => { setTimeout(() => no(new Error('no answer')), 4000); })]);
       const pref = (id) => all.prefs.find((p) => p.id === id)?.value;
       adopt(clean({ ...all, values: pref('values'), filters: pref('filters') }));
+      loaded = true;
     } catch {
       state.kept = false;
     }
@@ -2606,7 +2613,10 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       if (!persisted) { persisted = true; navigator.storage?.persist?.().catch(() => {}); } // ask once not to be evicted
     }).catch(() => { state.kept = false; summary(); });
   }
-  const savePref = (id) => keep(db.put('prefs', { id, value: state[id] }));
+  // A pref is one whole record: written before a load succeeded, it would replace the stored values or filters.
+  // shortcut: what is typed before the first load answers is shown but not kept; queue it if that ever matters.
+  let loaded = false;
+  const savePref = (id) => { if (loaded) keep(db.put('prefs', { id, value: state[id] })); };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Rows: the actions each one gets, drawn icons, and the key a row answers to (a pinned copy points at its original).
@@ -2872,6 +2882,7 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       });
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
         const t = n.data.toLowerCase();
+        if (t.length !== n.data.length) continue; // a letter whose lower case is longer (İ) would shift the marks: not painted
         for (const w of needles) {
           for (let i = t.indexOf(w); i >= 0; i = t.indexOf(w, i + w.length)) {
             const r = new Range();
@@ -3013,9 +3024,11 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
     area.focus();
   }
 
-  // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way.
-  function armed(b, ask, act) {
+  // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way. A double-click
+  // or a quick second click is one act, not a yes, so the second click counts only after a pause; a held key is below.
+  function armed(b, e, ask, act) {
     if (b.dataset.armed) {
+      if (e.detail > 1 || performance.now() - Number(b.dataset.at) < 600) return;
       clearTimeout(Number(b.dataset.armed));
       delete b.dataset.armed;
       act();
@@ -3028,9 +3041,12 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       if (label) b.setAttribute('aria-label', label);
       if (text) b.textContent = text;
     }, 4000));
+    b.dataset.at = String(performance.now());
     if (text) b.textContent = ask; else b.setAttribute('aria-label', ask);
     say(ask);
   }
+  // A held Enter repeats its click: on an armed button, the repeats are not a second click.
+  document.addEventListener('keydown', (e) => { if (e.repeat && e.target.matches?.('[data-armed]')) e.preventDefault(); });
 
   document.addEventListener('click', (e) => {
     const code = e.target.closest?.('.r > code');
@@ -3045,7 +3061,7 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
     else if (act === 'link') copyLink(id);
     else if (act === 'edit') openForm(state.entries.get(id));
     else if (act === 'remove') {
-      armed(b, 'Click again to delete this entry', () => {
+      armed(b, e, 'Click again to delete this entry', () => {
         state.entries.delete(id);
         keep(db.del('entries', id));
         render();
@@ -3101,6 +3117,9 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
   for (const input of $$('input[data-p]', setup)) {
     input.addEventListener('input', () => {
       const v = input.value.replace(IN_VALUE, '').trim();
+      const ok = !v || fits(input.dataset.p, v);
+      input.toggleAttribute('aria-invalid', !ok);
+      if (!ok) { say('A value takes letters, digits and . _ : / @ + = , % -'); return; } // the last good one holds
       if (v) state.values[input.dataset.p] = v; else delete state.values[input.dataset.p];
       fill();
       summary();
@@ -3158,7 +3177,8 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
 
   // An import adds what the file holds: pins join yours, and a note, an entry or a value with the same name replaces
   // yours. The file is checked before anything is written, and it is written in one go or not at all. A file can come
-  // from someone else, so values that would go into every command, new filters and replaced notes are asked about first.
+  // from someone else, so one question lists everything it would change first: entries with their code, notes, pins,
+  // values and filters.
   const importer = $('#import');
   importer.addEventListener('change', async () => {
     const file = importer.files?.[0];
@@ -3178,16 +3198,30 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       say(`That file would take you past ${MAX_ENTRIES} entries`);
       return;
     }
+    const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
     const values = Object.entries(c.values).filter(([k, v]) => state.values[k] !== v);
     const filters = raw.filters !== undefined && JSON.stringify(c.filters) !== JSON.stringify(state.filters);
-    const replaced = c.notes.filter((x) => state.notes.has(x.id) && state.notes.get(x.id) !== x.text).length;
-    if (values.length || filters || replaced) {
-      const ask = [`Import ${file.name}?`];
-      if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
-      if (filters) ask.push('', "Your filters are replaced by the file's.");
-      if (replaced) ask.push('', `${replaced} of your notes are replaced.`);
-      if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
+    const pins = c.pins.filter((p) => !state.pins.has(p.id)).length;
+    const notes = c.notes.filter((x) => state.notes.get(x.id) !== x.text);
+    const newNotes = notes.filter((x) => !state.notes.has(x.id)).length;
+    const same = (a, b) => a && a.kind === b.kind && a.code === b.code && a.text === b.text;
+    const entries = c.entries.filter((e) => !same(state.entries.get(e.id), e));
+    const newEntries = entries.filter((e) => !state.entries.has(e.id)).length;
+    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say('Nothing new in that file'); return; }
+    const ask = [`Import ${file.name}?`];
+    if (entries.length) {
+      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. They copy as written:`);
+      for (const e of entries.slice(0, 10)) {
+        const lines = e.code.split('\n');
+        ask.push(...lines.slice(0, 3).map((l) => `  ${l.length > 120 ? `${l.slice(0, 120)}...` : l}`), ...(lines.length > 3 ? ['  ...'] : []));
+      }
+      if (entries.length > 10) ask.push(`  and ${n(entries.length - 10, 'more entry', 'more entries')}`);
     }
+    if (notes.length) ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced.`);
+    if (pins) ask.push('', `${n(pins, 'pin', 'pins')} added.`);
+    if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
+    if (filters) ask.push('', "Your filters are replaced by the file's.");
+    if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
     for (const p of c.pins) if (!state.pins.has(p.id)) state.pins.set(p.id, p.at);
     for (const n of c.notes) state.notes.set(n.id, n.text);
     for (const e of c.entries) state.entries.set(e.id, e);
@@ -3197,17 +3231,18 @@ sh.startBalancer()</code><div class="m"><p>Stops the balancer, for a backup or u
       for (const p of c.pins) s('pins').put({ id: p.id, at: state.pins.get(p.id) });
       for (const n of c.notes) s('notes').put(n);
       for (const e of c.entries) s('entries').put(e);
-      s('prefs').put({ id: 'values', value: state.values });
-      s('prefs').put({ id: 'filters', value: state.filters });
+      if (loaded) { // after a failed load, the whole records would replace what is stored
+        s('prefs').put({ id: 'values', value: state.values });
+        s('prefs').put({ id: 'filters', value: state.filters });
+      }
     }));
     showSetup();
     render();
-    const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
     say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}`);
   });
 
   $('#wipe').addEventListener('click', (e) => {
-    armed(e.currentTarget, 'Click again to delete it all', () => {
+    armed(e.currentTarget, e, 'Click again to delete it all', () => {
       adopt(clean({}));
       keep(db.batch((s) => { for (const name of ['pins', 'notes', 'entries', 'prefs']) s(name).clear(); }));
       showSetup();
