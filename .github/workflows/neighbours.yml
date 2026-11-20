@@ -1,0 +1,66 @@
+name: neighbours
+
+# Every Pages site of this owner shares one origin, OWNER.github.io, so one CacheStorage: a service worker that
+# deletes caches it does not own wipes this app's offline copy, and this app's worker must not do it to them. Once a
+# day, and on demand, tools/neighbours.mjs opens each of the owner's Pages sites in a fresh headless Chrome, with a
+# cache planted that no site owns, and fails when one deletes it. A red run opens an issue; the next green run closes
+# it. GitHub pauses a schedule after 60 days without a commit: re-enable it on the Actions tab.
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, so two runs never open two issues.
+concurrency:
+  group: neighbours
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: No Pages site of this owner deletes a cache it does not own
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # read only: it raises the API's rate limit
+        run: node tools/neighbours.mjs "$GITHUB_REPOSITORY_OWNER"
+
+  issue:
+    if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }} # a manual run of another branch leaves the issue alone
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the neighbours issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.check.result }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="The neighbour check failed"
+          issue="$(gh api "repos/$GH_REPO/issues?state=open&labels=ci-failure&per_page=100" --jq ".[] | select(.pull_request == null and .title == \"$title\") | .number" | head -n 1)"
+          if [ "$RESULT" = "success" ]; then
+            [ -n "$issue" ] || exit 0
+            gh issue close "$issue" --comment "Fixed: every Pages site keeps the caches it does not own. $RUN"
+            exit 0
+          fi
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "Still red: $RUN"
+            exit 0
+          fi
+          gh label create ci-failure --force --color B60205 --description "The checks of a pull request or of main are red"
+          gh issue create --title "$title" --label ci-failure --body "The daily neighbour check failed: $RUN
+
+          Its log names each site and what it did. A site marked deleted has a service worker that clears caches it does not own: make it delete only the names that start with its own prefix. A site marked error could not be checked (a timeout, a page that failed), and a run that stops before the list could not reach the GitHub API or start the browser: the next run tries again. The next green run closes this issue."

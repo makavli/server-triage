@@ -105,7 +105,7 @@ test('only the app and its sources ship: text, and PNGs of image data only', () 
     } else {
       assert.match(file, /\.(md|mjs|js|css|html|json|webmanifest|ya?ml|svg)$|^(LICENSE|\.gitignore|\.gitattributes)$/, `unexpected file type: ${file}`);
       // The sheet and the page built from it grow with the content; any other big text file is a stray blob.
-      assert.ok(size < (['CHEATSHEET.md', 'index.html'].includes(file) ? 900_000 : 300_000), `${file} is ${size} bytes`);
+      assert.ok(size < (['CHEATSHEET.md', 'index.html'].includes(file) ? 1_200_000 : 300_000), `${file} is ${size} bytes`);
     }
   }
 });
