@@ -17,12 +17,16 @@
   const BLANK = BLANKS.length ? new RegExp(`\\b(${BLANKS.join('|')})\\b`, 'g') : null;
 
   let timer;
+  let spoken;
   function say(msg) {
     toast.textContent = msg;
     toast.classList.add('on');
     // A manual popover is in the top layer: raised again on each message, it shows above an open Setup panel.
     if (toast.popover === 'manual') { if (toast.matches(':popover-open')) toast.hidePopover(); toast.showPopover(); }
-    status.textContent = msg;
+    // A live region can stay silent when given the text it already holds: empty it, then say it again a moment later.
+    clearTimeout(spoken);
+    if (status.textContent === msg) { status.textContent = ''; spoken = setTimeout(() => { status.textContent = msg; }, 100); }
+    else status.textContent = msg;
     clearTimeout(timer);
     timer = setTimeout(() => toast.classList.remove('on'), 1800);
   }
@@ -415,6 +419,7 @@
     none.hidden = shown > 0;
     filterNote.hidden = !held;
     const more = held ? `; your filters hide ${held} more` : '';
+    clearTimeout(spoken); // a repeated message still waiting must not cover the count
     status.textContent = words.length ? `${shown} ${shown === 1 ? 'entry matches' : 'entries match'}${more}` : '';
     if (paint) highlight(words);
   }

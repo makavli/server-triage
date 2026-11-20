@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CACHED } from '../tools/build.mjs';
@@ -17,9 +17,10 @@ if (!findBrowser() && process.env.REQUIRE_BROWSER) throw new Error('REQUIRE_BROW
 const skip = findBrowser() ? false : 'no Chrome or Edge here (set BROWSER_BIN to one)';
 const timeout = 90_000;
 
+// A browser and a profile per test: nothing one test stores (or an open tab writes later) reaches the next.
 let browser;
-before(async () => { if (!skip) browser = await launch(); });
-after(async () => { await browser?.close(); });
+beforeEach(async () => { if (!skip) browser = await launch(); });
+afterEach(async () => { await browser?.close(); });
 
 async function until(page, expression, what) {
   for (let i = 0; i < 100; i++, await delay(50)) if (await page.evaluate(expression)) return;
@@ -55,9 +56,12 @@ test('opened from disk, it searches and copies, with no error', { skip, timeout 
   const [first, second, third] = await page.evaluate("[...document.querySelectorAll('code.k')].slice(0, 3).map((k) => k.textContent)");
   await page.click('code.k');
   await until(page, "document.querySelector('#toast').textContent === 'Copied'", 'the toast');
+  // The same message twice is said twice: the live region empties, then fills again.
+  await page.evaluate("window.said = []; new MutationObserver(() => window.said.push(document.querySelector('#status').textContent)).observe(document.querySelector('#status'), { childList: true, characterData: true, subtree: true }); true");
   await page.evaluate("document.querySelectorAll('code.k')[1].focus()");
   await page.key('Enter', 'Enter', 13);
   await until(page, 'window.copied.length === 2', 'the copy by keyboard');
+  await until(page, "window.said.join('|') === '|Copied'", 'the repeated message said again');
   assert.deepEqual(await page.evaluate('window.copied'), [first, second]);
   // A held Enter copies once; a copy that keeps a blank unfilled names it.
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat: true });
