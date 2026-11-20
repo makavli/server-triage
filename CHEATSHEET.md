@@ -4,7 +4,7 @@ Commands and error meanings for a broken host, service or database. Each entry i
 
 A tag after a block's language says more: `changes` changes state, `danger` can lose data, `deb` and `rhel` name the one distribution it is for, and a version such as `pg16+` is the oldest one it runs on.
 
-Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version. Searchable, click-to-copy and offline: [the app](https://makavli.github.io/server-triage/).
+Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, Helm 3 and 4, Argo CD 3, Gateway API 1.3 and later, Terraform 1.17 and OpenTofu 1.13, Vault 2.2 and OpenBao 2.7, Prometheus 3 and Alertmanager 0.28 and later, the OpenTelemetry Collector 0.165, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, ClickHouse 25.8 and 26.8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version. Searchable, click-to-copy and offline: [the app](https://makavli.github.io/server-triage/).
 
 ## The loop
 
@@ -3245,6 +3245,118 @@ kubectl get pods -n kube-system -l k8s-app=kube-dns -o wide
 
 CoreDNS pods and their nodes. If every pod is down, everything in the cluster that uses a name fails together.
 
+### Gateway API
+
+```sh
+kubectl get gatewayclass
+kubectl get gateway -A
+```
+
+Gateway API objects, then the Gateways of every namespace. **ACCEPTED** `True` on a GatewayClass means a controller owns it. `Unknown` stays when no installed controller matches its `controllerName`. A Gateway with **PROGRAMMED** `False` or an empty **ADDRESS** is not serving yet.
+
+```sh
+kubectl -n NS get gateway GWNAME -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}{range .status.listeners[*]}listener {.name} attached={.attachedRoutes}{range .conditions[*]}{"\n"}    {.type}={.status}/{.reason}: {.message}{end}{"\n"}{end}'
+```
+
+Gateway conditions, then one block per listener with its **attachedRoutes** count and its own `Accepted`, `Programmed`, `Conflicted` and `ResolvedRefs` conditions. A listener problem shows only here, not in `kubectl get`. A `Programmed` reason of `AddressNotAssigned` needs a load balancer.
+
+```sh
+kubectl -n NS get httproute ROUTE -o jsonpath='{range .status.parents[*]}{.parentRef.name}{"\n"}{range .conditions[*]}  {.type}={.status} {.reason}: {.message}{"\n"}{end}{end}'
+```
+
+Per parent Gateway: `Accepted` says whether the Gateway took the route, `ResolvedRefs` says whether its backends and certificates resolved. The reason and message name the rule and backend at fault. An empty result means no controller reported on it: the parent does not exist or belongs to no controller.
+
+```sh
+kubectl get crd gateways.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version} {.metadata.annotations.gateway\.networking\.k8s\.io/channel}{"\n"}'
+```
+
+The installed Gateway API CRD version and channel, such as `v1.6.1 experimental`. Some kinds and versions, such as `ReferenceGrant` `v1`, exist only from certain releases, and the `standard` channel has fewer kinds. A `no matches for kind` error often means older CRDs or the wrong channel.
+
+```sh changes
+kubectl apply -n NS -f - <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-routes
+spec:
+  from:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: FROMNS}
+  to:
+  - {group: "", kind: Service}
+EOF
+```
+
+Creates a ReferenceGrant in the namespace of the Service `NS`, allowing routes from `FROMNS` to reference Services there. The route's `RefNotPermitted` turns into `ResolvedRefs=True` within seconds. Deleting the grant brings it back. Grant only the kinds and namespaces you mean to. `v1beta1` works on every Gateway API release that has ReferenceGrant; `v1` needs Gateway API 1.5 or later.
+
+```sh changes
+kubectl -n NS patch gateway GWNAME --type json -p '[{"op":"replace","path":"/spec/listeners/0/allowedRoutes/namespaces/from","value":"All"}]'
+```
+
+Lets routes from any namespace attach to the first listener (the default is `Same`). This clears `NotAllowedByListeners`. Prefer `from: Selector` with a namespace label for shared Gateways, since `All` lets any tenant attach.
+
+```sh
+kubectl -n envoy-gateway-system get pods,svc -l gateway.envoyproxy.io/owning-gateway-name=GWNAME
+```
+
+Envoy Gateway only: the proxy Pod and the Service it created for a Gateway. The Pod should be `2/2 Running`. The Service type `LoadBalancer` with **EXTERNAL-IP** `<pending>` is the cause of `AddressNotAssigned` on a cluster without a load balancer. Other implementations use other namespaces and labels.
+
+```sh
+kubectl -n envoy-gateway-system port-forward svc/SVC 8080:80 &
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: NAME' http://127.0.0.1:8080/
+```
+
+Sends one request through the data plane, with the route's hostname as `Host`. `200` works. `404` means no route matched the host or path. `500` means a matched rule has an unresolved backend (`BackendNotFound`, `RefNotPermitted`, `PortNotFound`), and `503` means the backend has no ready endpoints.
+
+### Gateway API errors
+
+```text
+Accepted=False NoMatchingParent: No listeners match this parent ref
+```
+
+An HTTPRoute `parentRefs` entry names a `sectionName` or `port` that no listener of the Gateway has. Check the listener names with `kubectl get gateway GWNAME -o yaml`. If the Gateway itself does not exist, the route shows no status at all.
+
+```text
+Accepted=False NoMatchingListenerHostname: There were no hostname intersections between the HTTPRoute and this parent ref's Listener(s).
+```
+
+The route's `hostnames` and the listener's `hostname` do not overlap, such as `other.example.test` on a listener for `app.example.test`. Fix either list. A wildcard listener `*.example.test` matches every host that ends in `.example.test`, including `a.b.example.test`, but not `example.test` itself.
+
+```text
+Accepted=False NotAllowedByListeners: No listeners included by this parent ref allowed this attachment.
+```
+
+The listener's `allowedRoutes` does not allow this route's namespace or kind. The default is `Same`: routes must live in the Gateway's namespace. Change `allowedRoutes.namespaces`, or move the route.
+
+```text
+ResolvedRefs=False BackendNotFound: Failed to process route rule 0 backendRef 0: service gw/nosuchsvc not found.
+```
+
+A `backendRefs` entry names a Service that does not exist in that namespace. Rule and backend are counted from 0. Matching requests get a 500 from the proxy until the Service exists. Check `kubectl get svc -n NS`.
+
+```text
+ResolvedRefs=False RefNotPermitted: Failed to process route rule 0 backendRef 0: Backend ref to Service back/web not permitted by any ReferenceGrant.
+```
+
+The backend is in another namespace and no ReferenceGrant in that namespace allows this route. Create one that names the route's namespace in `from` and the Service kind in `to`. Check `kubectl get referencegrant -A`.
+
+```text
+ResolvedRefs=False PortNotFound: Failed to process route rule 1 backendRef 0: TCP Port 8081 not found on Service gw/web.
+```
+
+The route's backend `port` is not a port of the Service. Compare with `kubectl get svc NAME -n NS -o yaml` and use the Service port, not the container port. Requests to that rule get a 500.
+
+```text
+Programmed=False AddressNotAssigned: No addresses have been assigned to the Gateway
+```
+
+The controller built the data plane, but its Service has no address. Cloud clusters wait for a load balancer; bare metal and kind need one installed. The Service stays `<pending>`. Listeners can still report `Programmed=True`.
+
+```text
+Conflicted=True ProtocolConflict: All listeners for a given port must use a compatible protocol, conflicting listeners: gw/gwb/a, gw/gwb/b
+```
+
+Two listeners share a port with incompatible protocols, here HTTP and TCP on port 8080. The Gateway reports `ListenersNotValid` and those listeners are not programmed. Give them different ports or the same protocol with distinct hostnames. A listener with a missing certificate shows `ResolvedRefs=False InvalidCertificateRef: No valid secrets exist`.
+
 ### NetworkPolicy
 
 ```sh
@@ -3554,6 +3666,616 @@ error: Metrics API not available
 ```
 
 metrics-server is not installed or not Ready. `kubectl top` needs it: check `kubectl get apiservice v1beta1.metrics.k8s.io`.
+
+## Helm
+
+A Helm release is a set of Kubernetes objects plus a record of each revision. The record lives in Secrets named `sh.helm.release.v1.RELEASE.v` plus the revision number, in the release namespace, so most breakages are one of three things: an interrupted run left a release in a `pending-*` state, the objects in the cluster no longer match what Helm rendered, or another tool owns an object Helm wants. Commands run wherever `helm` and a working kubeconfig are, and Helm authenticates with that kubeconfig. Add `-n NS` for the release namespace or `-A` for all namespaces.
+
+Written for Helm 3.18 and later and Helm 4 (tested on 3.22 and 4.3). A flag that Helm 4 added or renamed carries a `helm4+` tag, and the paragraph names the Helm 3 form. In Helm 4, upgrades use server-side apply by default for a new release, and a release keeps the method it was installed with.
+
+### Helm: releases and status
+
+```sh
+helm version --short
+```
+
+The client version. Helm 3 and 4 differ in flags and in how they apply objects: 4 renames `--atomic` to `--rollback-on-failure`, adds `--force-conflicts` and `--force-replace`, and drops `list --all`. Run the matching binary for the release you are fixing.
+
+```sh
+helm list -A
+```
+
+Every release with its **STATUS**: `deployed`, `failed`, `pending-install`, `pending-upgrade`, `pending-rollback`, `uninstalling`. Helm 3 hides the `pending-*` and `uninstalling` ones unless you ask: use the next entry. Helm 4 showed a `pending-install` release here in testing, but ask by flag anyway.
+
+```sh
+helm list -A --pending --failed
+```
+
+Only releases stuck in a pending state or in `failed`. Empty output means none. Helm 3 also accepts `helm list -A --all`; Helm 4 rejects `--all`, so ask for each status flag.
+
+```sh
+helm status RELEASE -n NS
+```
+
+**STATUS**, **REVISION** and the **DESCRIPTION** of the last action, such as `Upgrade complete` or `Initial install underway`. Helm 4 also prints a resource table with each object's readiness. In Helm 3 add `--show-resources` for it.
+
+```sh
+helm history RELEASE -n NS
+```
+
+One row per revision with **STATUS** and **DESCRIPTION**. A `failed` row carries the error text. A `pending-upgrade` row that never finished is a dead run. Helm keeps 10 revisions by default (`HELM_MAX_HISTORY`).
+
+```sh
+helm get values RELEASE -n NS --all
+```
+
+The values the release actually applied: your overrides merged over the chart defaults, shown as **COMPUTED VALUES**. Without `--all` only your overrides show. Add `--revision REV` to see an older revision.
+
+```sh
+helm get metadata RELEASE -n NS
+```
+
+Chart, version, **REVISION**, **STATUS** and **DEPLOYED_AT**. Helm 4 adds **LABELS** and **APPLY_METHOD**, either `server-side apply` or `client-side apply`, which decides how conflicts with other tools show up.
+
+```sh
+helm get hooks RELEASE -n NS
+```
+
+The hook manifests stored with the release. An empty answer means the chart has none. For a release that failed in `pre-install` or `pre-upgrade`, this shows which Job or Pod to look for.
+
+### Helm: release Secrets
+
+```sh
+kubectl get secret -A -l owner=helm
+```
+
+One Secret per stored revision. The labels `name`, `version` and `status` mirror `helm history`, and Secrets of type `helm.sh/release.v1` hold the rendered chart. Use `-l owner=helm,status=pending-install` to find a stuck first install.
+
+```sh
+kubectl get secret -n NS -l owner=helm,name=RELEASE,version=REV -o jsonpath='{.items[0].data.release}' | base64 -d | base64 -d | gzip -dc | jq .info
+```
+
+The `info` block of one stored revision: **status**, **description** and the times. The data is base64 twice, then gzip, and needs `jq`. Drop `| jq .info` for the whole record, which also holds the chart and your values, so treat it as sensitive.
+
+### Helm: rendered against live
+
+```sh
+helm template RELEASE CHART -n NS -f FILE
+```
+
+Renders the chart locally, without a cluster. Template errors, bad values and YAML mistakes show here first. Add `--debug` to print a manifest that fails to parse. Compare with `helm get manifest` to see what changed since the release.
+
+```sh
+helm get manifest RELEASE -n NS
+```
+
+The manifest Helm stored for the current revision. This is what Helm believes it applied, not what runs now. Pipe it to `kubectl diff` to see the difference from the live objects.
+
+```sh
+helm get manifest RELEASE -n NS | kubectl diff -n NS -f -
+```
+
+Lines starting with `-` are live, `+` is what Helm rendered. A hand edit such as `kubectl scale` shows as `-  replicas: 3` and `+  replicas: 1`. `kubectl diff` exits 1 when there is any difference, so ignore `generation` noise.
+
+```sh
+helm template RELEASE CHART -n NS -f FILE | kubectl apply --dry-run=server -f -
+```
+
+Sends each rendered object to the API server for validation without saving it. This catches invalid fields, such as `spec.ports[0].port: Invalid value: 99999`, and missing CRDs. `helm upgrade --dry-run=server` and `helm template --validate` did not reject an invalid Service in testing.
+
+### Helm: stuck, failed and rollback
+
+```sh changes
+helm rollback RELEASE REV -n NS --wait --timeout 5m
+```
+
+Reverts to revision `REV` (take the last good one from `helm history`) and records it as a new revision, so history grows. This also clears a stuck `pending-upgrade`. It does not work for a stuck first install, which has no earlier revision.
+
+```sh changes
+kubectl delete secret -n NS -l owner=helm,name=RELEASE,status=pending-install
+```
+
+For a first install that was killed and now blocks every retry: removes Helm's record of the unfinished revision. The objects already created stay, and so does any hook Job; delete leftovers by hand. Make sure no `helm` process is still running.
+
+```sh danger
+helm uninstall RELEASE -n NS
+```
+
+Deletes every object of the release. It also works on a `pending-install` release. Add `--keep-history` to keep the record: the release then shows as `uninstalled` and its name stays taken until `helm rollback` or a full uninstall.
+
+```sh changes
+helm upgrade RELEASE CHART -n NS -f FILE --atomic --timeout 5m
+```
+
+Helm 3 form. Upgrades, waits for readiness, and rolls back by itself if the upgrade fails or times out. The failed attempt stays in `helm history` as `failed`, followed by a `Rollback to` revision.
+
+```sh changes helm4+
+helm upgrade RELEASE CHART -n NS -f FILE --rollback-on-failure --timeout 5m
+```
+
+The Helm 4 form of `--atomic`, which Helm 4 no longer has. It waits for readiness and rolls back if the upgrade fails or times out. Without a wait flag, Helm 4 uses `--wait=hookOnly`: it waits for hooks, not for your Deployments.
+
+```sh
+kubectl get jobs,pods -n NS
+```
+
+After a hook failure, the hook Job and its Pod are still there and hold the logs. Read them with `kubectl logs`.
+
+### Helm: ownership and conflicts
+
+```sh
+kubectl -n NS get configmap CMNAME -o jsonpath='{.metadata.labels}{"\n"}{.metadata.annotations}{"\n"}'
+```
+
+For an object Helm refuses to import: Helm needs the label `app.kubernetes.io/managed-by=Helm` and the annotations `meta.helm.sh/release-name` and `meta.helm.sh/release-namespace` to match the release. Use the object's real kind in place of `configmap`.
+
+```sh changes
+kubectl -n NS label configmap CMNAME app.kubernetes.io/managed-by=Helm
+kubectl -n NS annotate configmap CMNAME meta.helm.sh/release-name=RELEASE meta.helm.sh/release-namespace=NS
+```
+
+Adopts an existing object into the release by giving it Helm's ownership metadata, so the next install or upgrade accepts it. Use the real kind instead of `configmap`. Use the same `NS` in both commands.
+
+```sh changes
+helm upgrade --install RELEASE CHART -n NS -f FILE --take-ownership
+```
+
+Helm 3 and 4: ignores the ownership check and adopts the objects. In Helm 4 the objects are applied server-side, so a field set by another tool still fails. Add `--force-conflicts` there.
+
+```sh changes helm4+
+helm upgrade --install RELEASE CHART -n NS -f FILE --take-ownership --force-conflicts
+```
+
+Adopts objects owned by another tool and overwrites the fields that tool set, such as `kubectl-create`. Check with `helm get metadata` that **APPLY_METHOD** is `server-side apply`. The other tool may fight back if it still manages the object.
+
+```sh changes helm4+
+helm upgrade RELEASE CHART -n NS -f FILE --force-conflicts
+```
+
+Server-side apply fails when a field is owned by another manager, such as a `kubectl scale` or an autoscaler. This takes the fields over for Helm. If the other tool should keep a field, remove it from the chart instead.
+
+```sh changes
+helm upgrade RELEASE CHART -n NS -f FILE --reset-then-reuse-values
+```
+
+Resets to the new chart's defaults, then re-applies the values the last release used, then your `--set` and `-f` on top. Plain `--reuse-values` keeps the old chart's defaults and can hide new ones. Check the result with `helm get values RELEASE -n NS --all`.
+
+### Helm: OCI registries
+
+```sh
+helm registry login HOST:PORT -u REGUSER --password-stdin
+```
+
+Type or pipe the password on standard input so it stays out of history: `read -rs pw; printf '%s' "$pw" | helm registry login HOST:PORT -u REGUSER --password-stdin`. `Login Succeeded` is the goal. Credentials go to the file named by `HELM_REGISTRY_CONFIG`.
+
+```sh
+helm registry login HOST:PORT -u REGUSER --password-stdin --plain-http
+```
+
+For a registry served over plain HTTP, such as a local one. Helm 4 insists on HTTPS unless you pass `--plain-http` here and on `helm pull`, `helm push` and `helm show`. Helm 3 sends `127.0.0.1` over HTTP on its own.
+
+```sh
+helm pull oci://HOST:PORT/CHART --version REV
+```
+
+Downloads the chart archive. A `not found` means the repository or version does not exist; a `basic credential not found` or `401` means log in first.
+
+### Helm errors
+
+```text
+Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress
+```
+
+The last revision is still `pending-install`, `pending-upgrade` or `pending-rollback`, usually because a `helm` run was killed. Confirm with `helm history`. Fix: `helm rollback RELEASE REV`, or remove the pending Secret for a first install.
+
+```text
+Error: INSTALLATION FAILED: release name check failed: cannot reuse a name that is still in use
+```
+
+A release with that name exists, even a pending, failed or `uninstalled` one. Helm 3 prints `cannot re-use a name that is still in use`. Check `helm list -A --pending --failed --uninstalled`, then upgrade it or uninstall it.
+
+```text
+Error: UPGRADE FAILED: "nothere" has no deployed releases
+```
+
+Helm found no release of that name in this namespace, or one removed with `helm uninstall --keep-history`. Check the spelling and `-n NS`, and look with `helm list -A`. A release whose only revision is `failed` upgrades normally. Use `helm upgrade --install` to create it if missing.
+
+```text
+Error: release: not found
+```
+
+`helm status`, `get` or `rollback` found no release of that name in this namespace. Check `-n NS`, `--kube-context` and `helm list -A`. Releases are per namespace.
+
+```text
+Error: INSTALLATION FAILED: unable to continue with install: ConfigMap "own2-cfg" in namespace "h3" exists and cannot be imported into the current release: invalid ownership metadata; annotation validation error: missing key "meta.helm.sh/release-name": must be set to "own2"; annotation validation error: missing key "meta.helm.sh/release-namespace": must be set to "h3"
+```
+
+The object exists and Helm did not create it. Helm 3 starts with `Unable to continue`. The message lists the missing label or annotations. Fix: delete the object, add the ownership metadata, or use `--take-ownership`.
+
+```text
+Error: INSTALLATION FAILED: conflict occurred while applying object h3/own-cfg /v1, Kind=ConfigMap: Apply failed with 1 conflict: conflict with "kubectl-create" using v1: .data.message
+```
+
+Helm 4 server-side apply: another field manager owns `.data.message`, here `kubectl-create`. The same text appears as `UPGRADE FAILED` for a field changed by `kubectl scale` or an autoscaler. Fix: `--force-conflicts`, or stop the other tool writing that field.
+
+```text
+Error: UPGRADE FAILED: resource Deployment/h1/web-web not ready. status: InProgress, message: Pending termination: 1
+context deadline exceeded
+```
+
+Helm 4 gave up waiting for readiness after `--timeout` (5 minutes by default). The Deployment never became ready: read `kubectl describe deploy` and `kubectl get events`. Helm 3 prints only `context deadline exceeded`. The revision is `failed`; roll back or fix and upgrade.
+
+```text
+Error: INSTALLATION FAILED: failed pre-install: resource Job/h5/hk-pre not ready. status: Failed, message: Job Failed. failed: 1/1
+```
+
+A `pre-install` hook Job failed. Read the hook Pod's logs and fix the cause. The release stays `failed`: run `helm upgrade --install` again after the fix, and `helm uninstall` only to start clean. A hook that never finishes ends with `status: InProgress, message: Job in progress` and `context deadline exceeded`. Helm 3 prints `failed pre-install: 1 error occurred:` and `timed out waiting for the condition`.
+
+```text
+Error: UPGRADE FAILED: cannot patch "im-web" with kind Deployment: Deployment.apps "im-web" is invalid: spec.selector: Invalid value: {"matchLabels":{"app":"im","tier":"web"}}: field is immutable
+```
+
+The chart changed a field Kubernetes does not allow to change, most often a Deployment `spec.selector`. Helm 4 prints `server-side apply failed for object` instead of `cannot patch`. Revert the change, or delete the object and upgrade again, which means downtime for it.
+
+```text
+Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest: resource mapping not found for name: "w" namespace: "" from "": no matches for kind "Widget" in version "example.com/v1"
+ensure CRDs are installed first
+```
+
+The chart renders an object whose kind the cluster does not know, nearly always a missing CRD. Check `kubectl api-resources | grep -i widget`. Install the CRD first, in a separate release or in `crds/`. A CRD placed in `templates/` is applied too, but the custom resources in the same release fail with this error. Helm installs `crds/` once and never upgrades or deletes them, so update CRDs yourself with `kubectl apply`.
+
+```text
+Error: INSTALLATION FAILED: server-side apply failed for object h5/dr2-svc /v1, Kind=Service: Service "dr2-svc" is invalid: [spec.ports[0].port: Invalid value: 99999: must be between 1 and 65535, inclusive, spec.ports[0].targetPort: Invalid value: 99999: must be between 1 and 65535, inclusive]
+```
+
+The API server rejected a rendered object. The message names the object and the field. Fix the value or template; `kubectl apply --dry-run=server` finds it earlier.
+
+```text
+Error: INSTALLATION FAILED: demo/templates/nil.yaml:1:10
+  executing "demo/templates/nil.yaml" at <.Values.db.host>:
+    nil pointer evaluating interface {}.host
+```
+
+A template reads a value that is not set: here `.Values.db` is missing, so `.host` fails. Add the value in `values.yaml` or `--set`, or guard it with `if` or `default`. `helm template` and `helm lint` print the same error.
+
+```text
+Error: YAML parse error on demo/templates/yamlerr.yaml: error converting YAML to JSON: yaml: line 2: mapping values are not allowed in this context
+```
+
+The rendered file is not valid YAML, often an indent mistake from `toYaml` or `include`. Run `helm template CHART --debug` to print the broken output and read the line number inside it.
+
+```text
+Error: kubernetes cluster unreachable: Get "http://localhost:8080/version": dial tcp 127.0.0.1:8080: connect: connection refused
+```
+
+Helm found no usable kubeconfig, so it fell back to `localhost:8080`. Helm 3 prints `Kubernetes cluster unreachable` with a capital K. Check `KUBECONFIG`, `--kube-context` and `kubectl cluster-info`. `context "NAME" does not exist` names a wrong `--kube-context`.
+
+```text
+Error: failed to perform "FetchReference" on source: Get "https://127.0.0.1:5055/v2/charts/demo/manifests/0.1.0": http: server gave HTTP response to HTTPS client
+```
+
+Helm 4 reached a registry that speaks plain HTTP. Add `--plain-http` to `helm pull`, `push`, `show` and `registry login`, or serve the registry over TLS. A plain `connection refused` or `no such host` in the same place means the address is wrong.
+
+```text
+Error: failed to perform "FetchReference" on source: GET "http://127.0.0.1:5055/v2/charts/demo/manifests/0.1.0": basic credential not found
+```
+
+The registry needs a login and Helm has none for this host (Helm 3 prints `response status code 401: unauthorized: authentication required`). Run `helm registry login`. If login fails with `authenticating to`, the user or password is wrong.
+
+```text
+Error: failed to perform "FetchReference" on source: 127.0.0.1:5055/charts/demo:9.9.9: not found
+```
+
+The registry answered but has no such repository or version. Check the path after the host and the `--version`. List tags with the registry's own tool or API.
+
+## Argo CD
+
+Argo CD compares the Git source of each Application with the live cluster and reports two separate things: **Sync Status** (`Synced`, `OutOfSync`, `Unknown`) and **Health Status** (`Healthy`, `Progressing`, `Degraded`, `Missing`, `Suspended`). Breakage is usually in one of four places: the repo-server cannot produce manifests (`ComparisonError`), a sync fails or hangs in a hook, the live state drifts or is mutated, or a delete is stuck on a finalizer. The components are the `argocd-application-controller` StatefulSet, the `argocd-repo-server`, `argocd-redis` and `argocd-server` Deployments, all in the `argocd` namespace.
+
+The `argocd` commands below use `--core`: the CLI talks to the Kubernetes API with your kubeconfig, with no server login or token. It needs the current context's namespace set to `argocd` (first entry). Without `--core`, run `argocd login` first and the same commands go through the API server. `kubectl` entries work in both setups. Output is from Argo CD 3.6.
+
+### Argo CD: look first
+
+```sh changes
+kubectl config set-context --current --namespace=argocd
+```
+
+Makes `argocd --core` look in the `argocd` namespace, where the Application objects live. It changes your kubeconfig's current context, so switch back with the same command and your own namespace. Without it, `--core` commands fail or list nothing.
+
+```sh
+argocd --core version
+```
+
+In `--core` mode both blocks are the CLI's own build, not your cluster. For the installed version read the image: `kubectl -n argocd get deploy argocd-repo-server -o jsonpath='{..image}'`. A CLI far from the installed version causes odd flags and output.
+
+```sh
+kubectl -n argocd get pods
+```
+
+Every Argo CD component should be `Running` and ready. A repo-server or controller in `CrashLoopBackOff` or `OOMKilled` explains every app at once. Look at `kubectl -n argocd describe pod POD` and the previous logs.
+
+```sh
+kubectl -n argocd get app
+```
+
+One line per Application with **SYNC STATUS** and **HEALTH STATUS**. `Unknown` sync usually means a `ComparisonError`: read the condition. `Missing` health with `OutOfSync` is an app that was never synced.
+
+```sh
+argocd --core app list
+```
+
+The same list with destination, project, **CONDITIONS**, repo, path and target revision. A **CONDITIONS** value of `ComparisonError` or `InvalidSpecError` is the first thing to open. Add `-o name` for names only.
+
+```sh
+argocd --core app get APP
+```
+
+Sync and health, the last operation, any conditions, and one row per resource with **STATUS**, **HEALTH**, **HOOK** and **MESSAGE**. Start with the rows that are `OutOfSync`, `Degraded` or `Progressing`, and read their **MESSAGE**.
+
+```sh
+kubectl -n argocd get app APP -o jsonpath='{.status.conditions}{"\n"}'
+```
+
+The conditions as JSON, with their full text: `ComparisonError`, `InvalidSpecError`, and others. An empty list means none. The whole message is here even where the table cuts it off.
+
+```sh
+kubectl -n argocd get app APP -o jsonpath='{.status.operationState.phase}{"\n"}{.status.operationState.message}{"\n"}'
+```
+
+The last sync operation: **phase** is `Running`, `Succeeded`, `Failed`, `Error` or `Terminating`, and the message says why. `Running` for a long time means a hook, a wait or a retry. `Error` means the app spec was invalid.
+
+```sh
+argocd --core app history APP
+```
+
+Each past sync with its ID, time and Git revision. The ID is what `argocd app rollback` takes.
+
+```sh
+argocd --core app manifests APP
+```
+
+The manifests Argo CD generated from Git for this app, as the controller sees them. If these look wrong, the problem is in the chart, kustomization or path, not in the cluster. Output is long; add `| less`.
+
+```sh
+argocd --core repo list
+argocd --core cluster list
+argocd --core proj list
+```
+
+Registered repositories, clusters and projects. A repo with credentials shows **STATUS** and **MESSAGE**; a cluster shows **STATUS** `Successful` when it is reachable. In a plain install the repo list is empty because public repos need no entry.
+
+### Argo CD: components and logs
+
+```sh
+kubectl -n argocd logs deploy/argocd-repo-server --tail=200 | grep -E '"level":"(error|warning)"'
+```
+
+Errors from manifest generation: git fetch failures, Helm or Kustomize errors, a missing path. The `grpc.error` field has the text that ends up in the app's `ComparisonError`. No match means the problem is elsewhere.
+
+```sh
+kubectl -n argocd logs statefulset/argocd-application-controller --tail=300 | grep -E '"level":"(error|warning)"'
+```
+
+Controller errors: a cluster that cannot be reached, `Ignoring temporary failed attempt to compare app state against repo`, failed patches. Add `| grep '"application":"APP"'` to follow one app. Controller logs carry the sync and reconcile steps.
+
+```sh changes
+kubectl -n argocd rollout restart statefulset argocd-application-controller
+kubectl -n argocd rollout restart deployment argocd-repo-server
+```
+
+Restarts the controller and the repo-server. Apps are re-compared and manifest caches are lost; a sync in progress may be interrupted. Do this only after you captured logs, when a component hangs or stops updating apps.
+
+### Argo CD: refresh and sync
+
+```sh
+argocd --core app get APP --refresh
+```
+
+Normal refresh: re-reads the Git revision and compares again, using cached manifests when the commit is unchanged. Use it after a push when the app still shows the old commit. The `Sync Status` line shows the short commit it compared.
+
+```sh changes
+argocd --core app get APP --hard-refresh
+```
+
+Hard refresh: also drops the cached manifests for this app, so the repo-server renders them again. Use it when a manifest looks stale after a fix in a chart, a remote base or a plugin, and a normal refresh did not change it.
+
+```sh changes
+kubectl -n argocd annotate app APP argocd.argoproj.io/refresh=hard --overwrite
+```
+
+The hard refresh without the CLI: the controller removes the annotation when it is done. `refresh=normal` is the lighter one. Useful from a script or when you only have `kubectl`.
+
+```sh
+argocd --core app diff APP
+```
+
+What differs between Git and the live objects, as a diff: `<` is live, `>` is Git. Exit code 1 means there are differences, 0 means none. A permanent diff on a field you never change is usually a controller or a webhook writing it: read which field it is before you hide it.
+
+```sh changes
+argocd --core app sync APP
+```
+
+Applies Git to the cluster. Runs hooks first (`PreSync`, then `Sync`, `PostSync`). **Phase** `Succeeded` with **Message** `successfully synced (all tasks run)` is done. A failure shows `one or more objects failed to apply` and the reason per resource.
+
+```sh
+argocd --core app sync APP --dry-run
+```
+
+Shows what a sync would create or change, as `created (dry run)` or `unchanged (dry run)`, and applies nothing. Hooks are not run. Run it before a sync on a production app, and read the resource rows.
+
+```sh danger
+argocd --core app sync APP --prune
+```
+
+Syncs and deletes live objects that are no longer in Git. Without `--prune`, they show as `ignored (requires pruning)` and the command ends with `1 resources require pruning`. Check the diff first: an app pointed at the wrong path prunes everything.
+
+```sh changes
+argocd --core app terminate-op APP
+```
+
+Stops a running sync, for example one waiting on a hook Job that never completes. The phase becomes `Failed` with `Operation terminated`. Check the hook Job with `kubectl get jobs -n NS` before you sync again.
+
+```sh changes
+argocd --core app rollback APP ID
+```
+
+Deploys the revision from `argocd app history`. It refuses while auto-sync is on: `rollback cannot be initiated when auto-sync is enabled`. Disable it first. If the old revision differs from Git, the app shows `OutOfSync` until Git matches.
+
+```sh changes
+argocd --core app set APP --sync-policy none
+```
+
+Turns auto-sync off, so nothing syncs unless someone runs it. Do it before a rollback or a manual fix, so the controller does not overwrite your change. Turn it on again with `--sync-policy automated`. If the app comes from an app of apps with `selfHeal`, or from an ApplicationSet, the parent puts the policy back within seconds: disable auto-sync on the parent first.
+
+```sh danger
+argocd --core app set APP --sync-policy automated --self-heal --auto-prune
+```
+
+Syncs by itself on every Git change, reverts manual edits (`--self-heal`) and deletes what Git no longer has (`--auto-prune`). A wrong commit or path is then applied and pruned at once. Add the flags one at a time. An app owned by a parent app or an ApplicationSet gets this reverted unless you change the parent.
+
+### Argo CD: OutOfSync and drift
+
+```sh changes
+kubectl -n argocd patch app APP --type json -p '[{"op":"add","path":"/spec/ignoreDifferences","value":[{"group":"apps","kind":"Deployment","jsonPointers":["/spec/replicas"]}]}]'
+```
+
+Starts an ignore list: Argo CD ignores `spec.replicas` of Deployments in this app, so after the next refresh the app is `Synced` even when live replicas differ. This replaces any existing list. A Git-managed Application (app of apps, ApplicationSet) is changed in Git, or the parent reverts it. A sync still writes the Git value unless the `RespectIgnoreDifferences=true` sync option is set.
+
+```sh changes
+kubectl -n argocd patch app APP --type json -p '[{"op":"add","path":"/spec/ignoreDifferences/-","value":{"group":"apps","kind":"Deployment","jsonPointers":["/spec/replicas"]}}]'
+```
+
+Appends one rule to an existing `ignoreDifferences` list. It fails with `The request is invalid` when the app has no list yet: use the entry above to create it. A `--type merge` patch would replace the whole list.
+
+```sh
+argocd --core app get APP --refresh | grep -E 'Sync Status|OutOfSync'
+```
+
+After you change an ignore rule or a webhook, refresh and check that the rows leave `OutOfSync`. A mutating webhook, or an admission policy, that rewrites a field Git sets shows as a permanent diff with `<` as the mutated live value.
+
+### Argo CD: stuck deletion and app of apps
+
+```sh
+kubectl -n argocd get app APP -o jsonpath='{.metadata.deletionTimestamp}{" "}{.metadata.finalizers}{"\n"}'
+```
+
+A timestamp with `resources-finalizer.argocd.argoproj.io` still listed means Argo CD is waiting to delete the app's objects. It stays there until every object is gone. `argocd app get APP` shows which resource is `Progressing`.
+
+```sh
+kubectl -n NS get configmap CMNAME -o jsonpath='{.metadata.deletionTimestamp}{" "}{.metadata.finalizers}{"\n"}'
+```
+
+Checks a stuck object, here a ConfigMap but any kind works: a `deletionTimestamp` with a finalizer of another controller is what blocks the app delete. Fix that controller, or remove the finalizer by hand if its owner is gone.
+
+```sh danger
+kubectl -n argocd patch app APP --type merge -p '{"metadata":{"finalizers":null}}'
+```
+
+Removes the Argo CD finalizer so the Application object disappears. The app's live objects are not deleted: they stay in the cluster, unmanaged. Use it after the blocking object is cleared or when the destination cluster no longer exists. A parent app of apps with `selfHeal`, or an ApplicationSet, puts the finalizer back: disable auto-sync on the parent first.
+
+```sh danger
+argocd --core app delete APP --yes
+```
+
+Deletes the Application and, by default, every object it created. The CLI returns `application 'APP' deleted`. Add `--cascade=false` to remove only the Application and leave the objects running.
+
+```sh
+argocd --core app resources APP
+```
+
+For an app of apps: the child Applications are listed as resources of kind `Application`. The root app can be `Synced` and `Healthy` while a child has a `ComparisonError`, so check `argocd --core app list` for the children, not only the root.
+
+### Argo CD errors
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = nosuchdir: app path does not exist
+```
+
+The `path` in the Application is not in the repository at that revision. Check it with `git ls-tree`. After a repo restructure, update `spec.source.path`. The app shows sync `Unknown`.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = unable to resolve 'nosuchbranch' to a commit SHA: revision not found
+```
+
+`targetRevision` is not a branch, tag or commit in the repository. Check spelling and that the branch was pushed. A deleted branch causes this after a merge.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = FailedPrecondition desc = Failed to unmarshal "app.yaml": failed to unmarshal manifest: error converting YAML to JSON: yaml: line 5: did not find expected key
+```
+
+A YAML file in the app path does not parse. The message names the file and the line. Fix it in Git; the app recovers on the next refresh.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = failed to execute helm template command: failed running helm: `helm template . --name-template helmapp --namespace helmapp --kube-version 1.37.0 <api versions removed> --include-crds` failed exit status 1: Error: demo/templates/nil.yaml:1:10
+```
+
+A Helm chart fails to render in the repo-server. The text after `Error:` is Helm's own error, as `helm template` prints it. Run the same command locally with the app's values. Fix the chart.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = failed to list refs: Get "http://nosuch.invalid/repo.git/info/refs?service=git-upload-pack": dial tcp: lookup nosuch.invalid on 10.96.0.10:53: no such host
+```
+
+The repo-server cannot reach the Git host: wrong URL, DNS in the cluster, a firewall or proxy. Test from the pod: `kubectl -n argocd exec deploy/argocd-repo-server -- git ls-remote URL`. `repository not found:` at the end means the host answered but the path is wrong.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = failed to list refs: unexpected EOF
+```
+
+The URL answers, but not as a Git smart-HTTP server. Here it was a static web server that held a bare repository. Argo CD needs a real Git server such as GitHub, GitLab, Gitea or `git http-backend`.
+
+```text
+one or more objects failed to apply, reason: Service "badsvc" is invalid: [spec.ports[0].port: Invalid value: 99999: must be between 1 and 65535, inclusive, spec.ports[0].targetPort: Invalid value: 99999: must be between 1 and 65535, inclusive]
+```
+
+The API server rejected an object during sync. The reason after `reason:` is the Kubernetes validation error, per resource in the table too. Fix the manifest in Git. The operation phase is `Failed` and the app stays `OutOfSync`.
+
+```text
+ComparisonError  Failed to load target state: failed to generate manifest for source 1 of 1: rpc error: code = Unknown desc = failed to list refs: authentication required: <html>
+```
+
+The repository needs credentials and Argo CD has none for this URL; the web server's own reply (here a 401 page) follows. Register the repository with `argocd repo add URL` (add `--username` and let it prompt for the password) or a repository Secret in the `argocd` namespace. Check `argocd --core repo list`.
+
+```text
+one or more objects failed to apply, reason: error when patching "/dev/shm/695332104": Deployment.apps "plain-web" is invalid: spec.selector: Invalid value: {"matchLabels":{"app":"plain","tier":"web"}}: field is immutable
+```
+
+A manifest in Git changed an immutable field, usually a Deployment `spec.selector`. The sync fails and the app stays `OutOfSync`. Revert it, or delete the object by hand and sync again, accepting downtime. The temp file name differs each time.
+
+```text
+one or more objects failed to apply, reason: namespaces "nons-missing" not found
+```
+
+The destination namespace does not exist and the app does not create it. Add the sync option `CreateNamespace=true` to the Application or create the namespace first, then sync again.
+
+```text
+one or more synchronization tasks completed unsuccessfully
+```
+
+A sync hook failed, here a `PreSync` Job that exited 1 (the table row says `Job has reached the specified backoff limit`). Read the Job's Pod logs in the app's namespace. The main resources were not applied. Fix the hook and sync again.
+
+```text
+waiting for completion of hook batch/Job/presync-hang
+```
+
+The operation is `Running` because a hook Job has not finished. The app can show `Synced` and `Healthy` while this lasts. Read the Job's Pod. Stop with `argocd app terminate-op APP` if it will never end.
+
+```text
+InvalidSpecError: application destination server 'https://kubernetes.default.svc' and namespace 'locked1' do not match any of the allowed destinations in project 'locked'
+```
+
+The AppProject restricts destinations (and sources: `application repo URL is not permitted in project 'NAME'`). Add the destination or repo to the project, or move the app to another project. `argocd app sync` then prints `Phase: Error` and may keep waiting; press Ctrl-C.
+
+```text
+InvalidSpecError: there are no clusters with this name: nosuchcluster
+```
+
+`spec.destination.name` is not a registered cluster. Check `argocd cluster list`. For an app that points at a removed cluster, delete the app after removing the finalizer.
+
+```text
+rpc error: code = InvalidArgument desc = app is not allowed in project "nosuchproj", or the project does not exist
+```
+
+The Application's `spec.project` names a project that is missing or that does not allow this app. Check `argocd proj list`. Create the project or set `spec.project` to an existing one.
 
 ## Cloud: AWS, Google Cloud, Azure
 
@@ -3913,6 +4635,680 @@ Operation could not be completed as it results in exceeding approved standardDSv
 ```
 
 A vCPU quota is full in that region, for one VM family or for the regional total. **Current Limit** and **Current Usage** are the numbers from `az vm list-usage`. File a quota request in the portal under Usage + quotas.
+
+## Terraform and OpenTofu
+
+Infrastructure as code breaks in a few places: a state lock nobody released, a plan that shows changes nobody made (drift), a lock file or provider that does not install, and a backend that was changed under the working directory. Commands run in the root module's directory (the one holding the `.tf` files and `.terraform`), as the identity that owns the backend credentials. Output is from Terraform 1.17 and OpenTofu 1.13; `tofu` takes the same commands and flags, and the entries say where it differs. Look first, then change.
+
+### Terraform: look first
+
+```sh
+terraform version
+```
+
+The core version and, after `init`, each installed provider with its version. A core older than the `required_version` in the code fails with "Unsupported Terraform Core version". Compare it with the version your pipeline runs.
+
+```sh
+terraform workspace show
+```
+
+The active workspace, `default` unless someone created another. A plan that wants to create everything is often the right code in the wrong workspace: run this before you panic.
+
+```sh
+terraform state list
+```
+
+Every resource address the state tracks. Empty output with a non-empty configuration means a fresh or wrong backend, workspace or schema, not an empty estate. Compare with `terraform workspace list` and the `backend` block.
+
+```sh
+terraform plan -detailed-exitcode
+```
+
+Exit code **0** is no changes, **1** an error, **2** changes pending. Use it in a check job to alarm on drift. The plan text is the same as plain `plan`.
+
+### Terraform: state locks
+
+```sh
+terraform plan -lock-timeout=60s
+```
+
+Waits up to a minute for the state lock instead of failing at once. A run that applies for longer than that holds the lock the whole time, so a long wait is a real run, not a stuck one. Read the **Who** and **Created** lines first.
+
+```sh
+cat .terraform.tfstate.lock.info
+```
+
+Local backend only: the lock holder as JSON (**ID**, **Operation**, **Who**, **Created**). The lock itself is an operating system file lock held by the process, so a killed run leaves this file behind but holds no lock: the next `plan` or `apply` runs and removes it. Remote backends keep the lock in the backend.
+
+```sh danger
+terraform force-unlock LOCKID
+```
+
+Removes the state lock whose ID the error printed. If that run is still alive, two writers can corrupt the state, so confirm the holder is gone first (CI job dead, pod gone). Backends differ: the local one says "LocalState not locked", and the `pg` backend reports success yet changes nothing, because its lock is a session advisory lock that frees itself when the holder's connection closes.
+
+```sh
+terraform plan -lock=false
+```
+
+A plan that skips the lock, for a read when a stuck lock blocks you. It writes nothing for a plain plan. Never use `-lock=false` on `apply`: it removes the protection that keeps two runs apart.
+
+### Terraform: drift
+
+```sh
+terraform plan -refresh-only
+```
+
+Lists only what changed outside Terraform (a deleted or edited remote object), under "Objects have changed outside of Terraform", and proposes no remote change. Use it to see drift on its own before a normal plan mixes it with code changes.
+
+```sh changes
+terraform apply -refresh-only
+```
+
+Writes the observed values into the state and changes no remote object. Accepting a deletion this way makes Terraform forget the resource, so the next plan wants to create it again: that is the intended result of an accepted drift.
+
+```sh
+terraform plan -replace=ADDR
+```
+
+Shows the destroy-and-create of one resource without running it. The plan says "must be replaced" and marks the reason. Prefer this over the old `taint`, which edits state.
+
+```sh danger
+terraform apply -replace=ADDR
+```
+
+Destroys the resource and creates it again in one run. Data on it is lost and downstream resources may be replaced too: read the plan's "Plan: N to add, N to change, N to destroy" line before you approve.
+
+```sh
+terraform plan -out=FILE
+```
+
+Saves the exact plan. Apply it with `terraform apply FILE`, which skips the approval prompt. If the state changes after the plan was made, the apply fails with "Saved plan is stale": plan again. `terraform show FILE` prints it.
+
+### Terraform: state surgery
+
+```sh
+terraform state show ADDR
+```
+
+The attributes Terraform holds for one instance. Before any `state` command that writes, save a copy with `terraform state pull > FILE`. A wrong or missing address fails with "No instance found for the given address!" Use `state list` to copy the exact address, including `["key"]` for `for_each`.
+
+```sh changes
+terraform state mv ADDR NEWADDR
+```
+
+Renames a resource in the state only; it does not edit the code. Until the code uses the new address, the next plan wants to destroy the new one and create the old. Prefer a `moved` block, which travels with the code.
+
+```sh changes
+cat > moved.tf <<'EOF'
+moved {
+  from = random_pet.a
+  to   = random_pet.b
+}
+EOF
+```
+
+A `moved` block records a rename in the code. The plan shows "(moved from random_pet.a)" and no destroy, and the state updates on the next apply. Keep it until every environment has applied, then delete it.
+
+```sh changes
+cat > import.tf <<'EOF'
+import {
+  to = ADDR
+  id = "ID"
+}
+EOF
+```
+
+Brings an existing remote object under management: the resource block must already exist in the code. `plan` shows "1 to import" and `apply` records it. A resource that does not support import fails with "Resource Import Not Implemented".
+
+```sh danger
+terraform state rm ADDR
+```
+
+Makes Terraform forget a resource without touching the remote object. The next plan wants to create it again, which can fail on a name clash or duplicate the object. Use it only to hand an object to other code. A `removed` block with `lifecycle { destroy = false }` does the same from code and shows in the plan first.
+
+```sh danger
+terraform state push -force FILE
+```
+
+Overwrites the stored state with a saved copy (see `state pull`). Without `-force` Terraform refuses an older copy with "cannot import state with serial 3 over newer state with serial 4". Anything applied since the copy was taken is forgotten, so run `plan` before anything else.
+
+### Terraform: providers and the lock file
+
+```sh changes
+terraform init -upgrade
+```
+
+Re-selects the newest provider and module versions the constraints allow and rewrites `.terraform.lock.hcl`. A provider major version can change behaviour, so read the plan afterwards. Commit the lock file with the change.
+
+### Terraform: backends and workspaces
+
+```sh changes
+terraform init -reconfigure
+```
+
+Reads the backend block fresh and ignores the old backend setup. It does not copy state. If the new location is empty, `state list` is empty and the next plan wants to create everything: that is the signal you pointed at the wrong place.
+
+```sh changes
+terraform init -migrate-state
+```
+
+Copies the state from the previously configured backend to the new one, asking before it does. Without a terminal it stops with "Error asking for confirmation: EOF": add `-force-copy` in a pipeline. Check `state list` on the new backend before you delete the old one.
+
+```sh changes
+terraform workspace select WORKSPACE
+```
+
+Switches the active workspace. Fails with `Workspace "..." doesn't exist.` for an unknown name; add `-or-create` to create it, or use `workspace new`.
+
+```sh danger
+terraform workspace delete WORKSPACE
+```
+
+Deletes the workspace's state. A workspace that still tracks resources is refused with "Workspace is not empty"; `-force` deletes the state and leaves the remote objects running with nothing managing them.
+
+### Terraform: debugging and OpenTofu
+
+```sh
+TF_LOG=DEBUG TF_LOG_PATH=tf.log terraform plan
+```
+
+Writes debug logs to a file; levels are `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. The log can hold tokens and resource attributes, so do not post it as is. Look for the first `[ERROR]` and the provider's RPC lines.
+
+```sh
+read -rs pass
+export TF_ENCRYPTION="key_provider \"pbkdf2\" \"k\" { passphrase = \"$pass\" }
+method \"aes_gcm\" \"m\" { keys = key_provider.pbkdf2.k }
+state { method = method.aes_gcm.m }"
+tofu plan
+```
+
+OpenTofu state encryption (OpenTofu 1.7 and later), set here through the `TF_ENCRYPTION` variable so the passphrase never reaches a file. An encrypted state needs the same configuration on every run, including `state list` and `plan`; a wrong passphrase gives "decryption failed for all provided methods", and a state that is still plain text needs an `unencrypted` fallback first (see the errors).
+
+### Terraform errors
+
+```text
+Error: Error acquiring the state lock
+
+Error message: resource temporarily unavailable
+Lock Info:
+  ID:        9d4990f5-acc2-db53-b653-77e134a38573
+  Path:      terraform.tfstate
+  Operation: OperationTypeApply
+  Who:       root@93841bbafcc4
+  Version:   1.17.2
+  Created:   2026-11-20 21:01:19.980727194 +0000 UTC
+  Info:      
+```
+
+Another run holds the lock. **Who** and **Created** say whose and since when, **Operation** what it is doing. Wait or use `-lock-timeout`; unlock only when the holder is gone. A killed run on a remote backend that keeps a lock record (not `pg`, whose lock frees when the connection closes) leaves a stale lock: this block's **Created** time tells you.
+
+```text
+Failed to unlock state: LocalState not locked
+```
+
+`force-unlock` on the local backend when no process holds the lock. Nothing is stuck: local locks vanish with their process, even when `.terraform.tfstate.lock.info` is left behind. A lock you cannot clear belongs to a remote backend.
+
+```text
+Error: Inconsistent dependency lock file
+
+The following dependency selections recorded in the lock file are
+inconsistent with the current configuration:
+  - provider registry.terraform.io/hashicorp/random: required by this configuration but no version is selected
+```
+
+The lock file is missing, or does not match the `required_providers` constraints. Run `terraform init` (add `-upgrade` after you changed a version constraint) and commit the new lock file.
+
+```text
+Error: Required plugins are not installed
+
+The installed provider plugins are not consistent with the packages selected
+in the dependency lock file:
+  - registry.terraform.io/hashicorp/random: there is no package for registry.terraform.io/hashicorp/random 0.0.1 cached in .terraform/providers
+```
+
+`.terraform` does not hold the locked provider, usually a fresh checkout or a cache from another working directory. Run `terraform init`; in CI cache `.terraform/providers` keyed by the lock file.
+
+```text
+Error: Failed to install provider
+
+Error while installing hashicorp/random v3.9.1: the current package for
+registry.terraform.io/hashicorp/random 3.9.1 doesn't match any of the
+checksums previously recorded in the dependency lock file
+```
+
+The downloaded provider does not match the lock file's checksums: another platform than the one that wrote the lock, a changed mirror, or a tampered package. Record every platform with `providers lock`; treat a mismatch on the same platform as a security event.
+
+```text
+Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider
+hashicorp/time: no available releases match the given constraints >= 99.0.0
+```
+
+No release satisfies the version constraint (or the registry or mirror cannot be reached: the text then names the network error). Run `terraform providers` to see which module sets the constraint.
+
+```text
+Error: Backend initialization required, please run "terraform init"
+
+Reason: Initial configuration of the requested backend "pg"
+```
+
+The `backend` block changed, or `.terraform` is missing. Run `init`: use `-migrate-state` to carry the state to the new backend, or `-reconfigure` to start from what the new backend already holds.
+
+```text
+Error: Cycle:
+  random_pet.c1
+  random_pet.c2
+```
+
+Resources reference each other directly or through others, so no order exists. The lines list the loop. Remove one reference or use a variable or a data source. `terraform graph` draws it.
+
+```text
+Error: Invalid for_each argument
+
+  on fe.tf line 2, in resource "time_sleep" "fe":
+   2:   for_each        = toset([random_pet.new.id])
+    │ random_pet.new.id is a string, known only after apply
+```
+
+`for_each` (or `count`) uses a value Terraform learns only at apply. Key the instances by values known at plan time, or apply the dependency first with `-target`, then run a normal plan.
+
+```text
+Error: Saved plan is stale
+
+The given plan file can no longer be applied because the state was changed by
+another operation after the plan was created.
+```
+
+The state changed after `plan -out`. Plan again and apply the new file. In a pipeline this means two runs raced: add a lock or serialise the jobs.
+
+```text
+Error: Resource already managed by Terraform
+
+Terraform is already managing a remote object for time_static.t. To import
+to this address you must first remove the existing object from the state.
+```
+
+An import target already holds an object. Check `state show`; `state rm` first only when you mean to replace what is tracked there.
+
+```text
+Error: Resource Import Not Implemented
+
+This resource does not support import. Please contact the provider developer
+for additional information.
+```
+
+The provider's resource has no import support (`random_pet` is one). Recreate it, or manage the existing object with a different resource type.
+
+```text
+Error: Unsupported Terraform Core version
+
+This configuration does not support Terraform version 1.17.2. To proceed,
+either choose another supported Terraform version or update this version
+constraint.
+```
+
+The `required_version` constraint excludes the binary that ran. Use the pinned version (a `.terraform-version` or CI image) instead of loosening the constraint.
+
+```text
+Error: No value for required variable
+
+The root module input variable "need" is not set, and has no default value.
+```
+
+A variable without a default got no value, and `-input=false` (as in CI) cannot prompt. Pass `-var`, `-var-file` or a `TF_VAR_need` variable. A wrong type gives "Invalid value for input variable".
+
+```text
+Provider produced inconsistent result after apply
+```
+
+The provider returned a value that disagrees with the plan, and the message ends "This is a bug in the provider". The object usually exists: run `plan` again to see the real state, then report it to the provider and upgrade or pin another version. From Terraform's source.
+
+```text
+Provider produced inconsistent final plan
+```
+
+Between plan and apply the provider changed the planned action or returned an invalid new value ("produced an invalid new value for ..."). It is a provider bug: re-run the apply, since the second plan often settles, then update the provider.
+
+```text
+Error: Error acquiring the state lock
+
+Error message: failed to write backup file: encountered unencrypted payload
+without unencrypted method configured
+```
+
+OpenTofu with state encryption on, reading a state that is still plain text. The first apply that migrates needs a `fallback` pointing to an `unencrypted` method; remove that fallback once the state is encrypted.
+
+```text
+Error: Error acquiring the state lock
+
+Error message: failed to write backup file: decryption failed for all
+provided methods
+attempted decryption failed for state: decryption failed: cipher: message
+authentication failed
+```
+
+OpenTofu: the passphrase or key does not decrypt this state. Use the key that wrote it. Despite the heading, nothing is locked: the lock step is where the state is first read.
+
+```text
+Error: Error refreshing the state
+
+Failed to load state: Unsupported state file format: This state file is encrypted and can not be read without an encryption configuration
+```
+
+OpenTofu read an encrypted state without the `encryption` block or `TF_ENCRYPTION`. Set it in the environment of every command, including `tofu state list`. A passphrase under 16 characters fails with "passphrase is too short (minimum 16 characters)".
+
+## Vault and OpenBao
+
+Vault problems come as a sealed node, a cluster without a leader, a token that cannot do what it needs, a lease that will not go away, or an audit device that stops every request. Commands run on a node or a workstation with the CLI as `vault` (`bao` for OpenBao: same commands and output, with `BAO_ADDR` and `BAO_TOKEN`). Set `VAULT_ADDR` and take the token without a trace in history: `read -rs VAULT_TOKEN; export VAULT_TOKEN`. Tested on Vault 2.2 and OpenBao 2.7 with Raft storage; names below are Vault's.
+
+### Vault: look first
+
+```sh
+vault status
+```
+
+Exit code **0** is unsealed, **2** sealed or uninitialised, **1** cannot connect. **Sealed** true needs an unseal; **HA Mode** says active or standby, **Active Node Address** names the leader, and **Removed From Cluster** true means this node was taken out of the Raft cluster. **Seal Type** transit or awskms means auto-unseal.
+
+```sh
+printenv | grep -E '^(VAULT_ADDR|VAULT_CACERT|VAULT_NAMESPACE|BAO_ADDR|BAO_CACERT|BAO_NAMESPACE)='
+```
+
+The settings that point the CLI at a server. A stale `VAULT_ADDR` (a load balancer, an old node, http against https) explains most "it works on that machine". The token is left out on purpose.
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' "$VAULT_ADDR/v1/sys/health"
+```
+
+The load balancer's view. **200** active, **429** standby, **472** DR secondary, **473** performance standby, **501** not initialised, **503** sealed, **530** removed from the Raft cluster (Vault 2.2: checked). **472** and **473** exist only with Vault Enterprise replication; OpenBao returns none of 472, 473 and 530. A balancer must route to 200, or pass `?standbyok=true`. See the [health API](https://developer.hashicorp.com/vault/api-docs/system/health).
+
+```sh
+vault operator raft list-peers
+```
+
+Raft members with **State** (leader or follower) and **Voter**. A new node shows follower and `false` for the first seconds while autopilot stabilises it. Needs a token: without one, "permission denied". A sealed node answers "Vault is sealed".
+
+```sh
+vault operator raft autopilot state
+```
+
+**Healthy**, **Failure Tolerance** (nodes you can lose and keep a quorum) and per node **Healthy**, **Last Contact** and **Last Index**. A node with a growing **Last Contact** is unreachable or stuck. **Failure Tolerance** 0 means one more loss ends the cluster.
+
+```sh
+vault read sys/leader
+```
+
+**is_self**, **leader_address** and **leader_cluster_address**. It needs no token, and every node answers from its own view, so ask each node to find one that disagrees; `leader_address` empty means no leader. On a standby **active_time** reads `0001-01-01T00:00:00Z`.
+
+```sh
+journalctl -u vault --since "30 min ago" --no-pager | grep -E '\[(ERROR|WARN)\]'
+```
+
+The service log filtered to problems (the unit is `vault`, `openbao` for OpenBao). Raft and seal trouble show here before they show in the API. Without systemd use `docker logs` or the server's stderr.
+
+### Vault: unseal and seal
+
+```sh changes
+vault operator unseal
+```
+
+Prompts for one unseal key share (hidden). Repeat with different shares until **Unseal Progress** reaches the threshold. A key that is not valid base64 fails with "must be a valid hex or base64 string"; shares that do not combine fail with "invalid key" and progress resets.
+
+```sh changes
+vault operator init
+```
+
+Initialises a new, empty cluster and prints the unseal (or recovery) keys and the first root token once, with default shares and threshold. Do not send the output to a log or a ticket; use `-recovery-pgp-keys` or `-pgp-keys` to get encrypted shares. An initialised cluster answers "Vault is already initialized". Revoke the root token afterwards.
+
+```sh danger
+vault operator seal
+```
+
+Seals this node: it stops serving, and on the active node the cluster elects another. Sealing every node is an outage until someone unseals, or auto-unseal does it. Use it for a suspected compromise, not for a restart.
+
+```sh changes
+vault operator step-down
+```
+
+Asks the active node to give up leadership so a standby takes over. Clients see a brief pause. Use it before you restart or patch the active node.
+
+### Vault: Raft cluster
+
+```sh danger
+vault operator raft remove-peer NODEID
+```
+
+Removes a server from the Raft configuration. A live node removed this way logs "node has been removed from the HA cluster", shuts its core down and shows **Removed From Cluster** true; it must be wiped and rejoined. Remove only a node that is gone for good. It needs a leader: with a majority of voters lost it fails with "local node not active but active cluster node not found", and the way out is the `peers.json` recovery below.
+
+```sh danger
+sudo systemctl stop vault && sudo sh -c 'echo "[{\"id\":\"NODEID\",\"address\":\"HOST:8201\",\"non_voter\":false}]" > DATADIR/raft/peers.json' && sudo systemctl start vault
+```
+
+Last resort when most voters are lost for good: on every surviving node (stop them all first), write `peers.json` with only the survivors, then start. Vault logs "raft recovery initiated: recovery_file=peers.json", deletes the file and elects a leader from that list. Use one entry per survivor, take a snapshot copy of the data first, and rebuild the lost nodes as new joiners.
+
+```sh
+vault operator raft snapshot save FILE
+```
+
+Writes a point-in-time copy of the cluster's data (run it on the active node, with a token that may read it). Take one before any peer removal, upgrade or restore. `snapshot inspect FILE` lists the contents.
+
+### Vault: tokens and policies
+
+```sh
+vault token lookup
+```
+
+The calling token: **policies**, **ttl**, **expire_time**, **explicit_max_ttl**, **renewable**, **orphan**, **num_uses**. An expired or revoked token cannot look itself up and gets "permission denied"; a **ttl** of 0 belongs to root and other tokens that do not expire.
+
+```sh
+vault token lookup -accessor ACCESSOR
+```
+
+The same fields for another token, found by its accessor (the id is not needed and is not shown). Use it to see who owns a token a log line names. **display_name** and **path** say which auth method created it.
+
+```sh
+vault token capabilities VPATH
+```
+
+What the calling token may do on that path: `read`, `create`, `update`, `delete`, `list`, `sudo`, `deny`, or `root`. For kv version 2 use the `data/` path (`secret/data/app/x`), not the path you type with `vault kv get`. `deny` is the answer behind "permission denied".
+
+```sh
+vault token capabilities -accessor ACCESSOR VPATH
+```
+
+The same check for another token, without putting its secret on a command line. Compare with the policy text from `vault policy read VPOLICY`: path globs (`*`) match a prefix only, and `+` matches one segment.
+
+```sh changes
+vault token renew
+```
+
+Resets the calling token's TTL from now: to its period for a periodic token, else to its creation TTL or the `-increment` asked for. A renew cannot pass the **explicit_max_ttl** or the mount's max TTL: Vault caps it with the warning "TTL of ... exceeded the effective max_ttl". An app that renews at the cap needs a new login, not more renews.
+
+```sh danger
+vault token revoke -accessor ACCESSOR
+```
+
+Revokes a token and every child token and lease below it, so dynamic credentials issued to it stop too; only children that were created as orphans survive (`-mode=orphan` on a token keeps all children). The holder gets "permission denied" at once. Look it up first.
+
+### Vault: leases
+
+```sh
+vault lease lookup LEASEID
+```
+
+**ttl**, **expire_time**, **issue_time** and **renewable** of a secret lease (a dynamic credential). A revoked or expired lease says "invalid lease". The ID is the full path, such as `database/creds/ro/` and an ID.
+
+```sh
+vault list sys/leases/lookup/VPATH
+```
+
+The lease IDs below a prefix such as `database/creds/ro`. Many entries mean clients ask for credentials faster than they release them: look at the role's TTL and at the app's cache.
+
+```sh changes
+vault lease renew LEASEID
+```
+
+Extends one lease, up to the role's max TTL. The CLI prints the new **lease_duration**; "lease not found" means it is already gone. Add `-increment=5m` for an exact request, which the engine may shorten.
+
+```sh changes
+vault lease revoke LEASEID
+```
+
+Queues revocation of one lease: the engine deletes the dynamic credential (the database user). "All revocation operations queued successfully!" does not say it finished; run `lease lookup` to see "invalid lease".
+
+```sh danger
+vault lease revoke -prefix VPATH
+```
+
+Revokes every lease under a path, such as `database/creds/ro`, and kills every credential in use there. Apps need new credentials at once. Use it after a leak, not as housekeeping.
+
+```sh danger
+vault lease revoke -force -prefix VPATH
+```
+
+Removes the lease records even when the engine cannot delete the real credential (the database is down). Vault can then forget users that still exist in the database. Use it only to clear leases for an engine that is gone, and clean up the targets by hand.
+
+### Vault: audit and TLS
+
+```sh
+vault audit list -detailed
+```
+
+The audit devices and their options. With devices enabled, Vault refuses every request when none of them can write the entry. If this command also fails with "internal error", an audit device is blocked: see the errors group.
+
+```sh changes
+vault audit enable file file_path=FILE
+```
+
+Adds a file audit device. Enable a second device on another disk before you take the first out of service: with at least one working device Vault keeps serving. The path must be writable by the Vault user.
+
+```sh
+openssl s_client -connect HOST:PORT -servername NAME </dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
+```
+
+The certificate the listener presents: **subject**, **issuer**, **notAfter** and the DNS and IP names it covers. A name the client uses that is not in the alternative names gives an x509 "valid for" error, and an issuer your client does not trust gives "unknown authority".
+
+### Vault errors
+
+```text
+Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": http: server gave HTTP response to HTTPS client
+```
+
+`VAULT_ADDR` says https and the listener has TLS off (`tls_disable = 1`). Fix the scheme. The mirror image is "Client sent an HTTP request to an HTTPS server." with code 400.
+
+```text
+Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+The CLI does not trust the listener's CA. Set `VAULT_CACERT` to the CA file; do not use `VAULT_SKIP_VERIFY` outside a quick test. A host not in the certificate names gives "certificate is valid for ... not ...".
+
+```text
+Error checking seal status: Get "http://127.0.0.1:9/v1/sys/seal-status": dial tcp 127.0.0.1:9: connect: connection refused
+```
+
+Nothing listens at that address: the service is down, the port is wrong, or Vault is still starting (it opens the listener only after the seal provider answers). Check `systemctl status vault` and the log.
+
+```text
+Code: 503. Errors:
+
+* Vault is sealed
+```
+
+The node is sealed, so every API call fails. Run `vault status`, then unseal, or fix the auto-unseal provider if it is a transit or KMS seal. A restart seals a Shamir node again.
+
+```text
+Code: 400. Errors:
+
+* Vault is already initialized
+```
+
+`vault operator init` on a cluster that has data. Nothing is wrong. Wiping storage and initialising again destroys all secrets: restore from a snapshot instead.
+
+```text
+Code: 403. Errors:
+
+* 1 error occurred:
+	* permission denied
+```
+
+The token is valid but its policies do not allow that path and operation. Run `vault token capabilities VPATH` and `vault token lookup`, then fix the policy. Kv version 2 needs the `data/` path in the policy. "2 errors occurred: permission denied, invalid token" means the token itself is expired or revoked; "bad token" means a malformed one.
+
+```text
+Code: 400. Errors:
+
+* invalid key: failed to compute combined key: all parts must be the same length
+```
+
+Shares from different keys, a mistyped share or another cluster's key were mixed. Progress resets after this error: start the unseal over with correct shares. A wrong share is not rejected until the threshold is reached.
+
+```text
+Code: 404. Errors:
+
+* no handler for route "auth/nosuch/login". route entry not found.
+```
+
+No auth method or engine is mounted at that path. `vault auth list` and `vault secrets list` show the mounts; the mount path is not always the type name.
+
+```text
+Code: 403. Errors:
+
+* preflight capability check returned 403, please ensure client's policies grant access to path "nomount/foo/"
+```
+
+`vault kv get` on a path whose mount does not exist, or that the token cannot see. The wording blames policy even for a mount typo: check `vault secrets list` first.
+
+```text
+WARNING! The following warnings were returned from Vault:
+
+  * Invalid path for a versioned K/V secrets engine. See the API docs for the
+  appropriate API endpoints to use. If using the Vault CLI, use 'vault kv get'
+  for this operation.
+```
+
+`vault read` on a kv version 2 mount. Use `vault kv get`, or read `secret/data/PATH` and write policies against `data/`. "No value found at secret/data/..." means the path is valid and empty.
+
+```text
+Code: 400. Errors:
+
+* invalid lease
+```
+
+A `lease lookup` for a lease that was revoked, expired or never existed. `lease renew` says "lease not found" for the same case. Request new credentials.
+
+```text
+Code: 500. Errors:
+
+* internal error
+```
+
+On a node with a working seal, a 500 on every request, even `vault audit list`, points at the audit device. The log shows the cause (next entry). On its own it can also be a storage problem: read the log.
+
+```text
+[ERROR] core: failed to audit request: path=auth/token/lookup-self
+  | error writing file for sink "/aud/audit.log": unable to re-write to file for sink "/aud/audit.log": write /aud/audit.log: no space left on device
+```
+
+The only audit device cannot write, so Vault refuses all requests rather than serve unlogged. Free space or fix permissions on the audit path. Enable a second device on another disk to avoid a single point of failure.
+
+```text
+Code: 500. Errors:
+
+* local node not active but active cluster node not found
+```
+
+This node is a standby and knows no active node, so it cannot forward. The cluster has no leader: a quorum of voters is down or cut off. In the log: "failed to contact quorum of nodes, stepping down". Restore the network or the voters.
+
+```text
+[ERROR] core: shutting down core: error="node has been removed from the HA cluster"
+```
+
+An operator or autopilot removed this node from the Raft configuration. `vault status` shows **Removed From Cluster** true. Stop it, wipe its data directory and rejoin with `vault operator raft join` if it should come back.
+
+```text
+error parsing Seal configuration: Put "http://vault-seal.example.test:8200/v1/transit/encrypt/unseal": dial tcp: lookup vault-seal.example.test on 127.0.0.11:53: no such host
+```
+
+Auto-unseal through transit could not reach the seal provider at startup, so the node cannot start. Restore the name resolution or network to the seal server, or check the KMS credentials and key for other seal types.
 
 ## App runtimes: JVM, Node.js, Python, Go
 
@@ -4341,6 +5737,534 @@ Killed
 ```
 
 The shell's word for SIGKILL, exit code 137: in a container, usually the kernel OOM killer, with no Go error at all. `GOMEMLIMIT` is soft and does not prevent it. Check `dmesg -T | grep -i 'out of memory'` and `docker inspect` for `OOMKilled`.
+
+## Prometheus and Alertmanager
+
+Prometheus usually breaks in four ways: a target stops answering, a rule or a config reload fails, the series count grows until memory runs out, or an alert fires and no notification arrives. Check the targets first, then the rules, then Alertmanager. Commands use `http://HOST:9090` for Prometheus and `http://HOST:9093` for Alertmanager (the defaults), and run from any machine that can reach them. `promtool` and `amtool` ship in the release tarballs and images; run `promtool check` on the host that holds the files. Queries run with `promtool query instant`, which sends no credentials: add `--http.config.file=FILE` when the server needs a login. JSON output is read with `jq`. Output is from Prometheus 3.16 and Alertmanager 0.35.
+
+### Prometheus: look first
+
+```sh
+curl -s http://HOST:9090/-/healthy; curl -s http://HOST:9090/-/ready
+```
+
+`Prometheus Server is Healthy.` means the process is up; `Prometheus Server is Ready.` means it serves queries. A non-200 from `/-/ready` right after a start is a server still loading: the log shows `Replaying WAL, this may take a while`.
+
+```sh
+curl -s http://HOST:9090/api/v1/status/runtimeinfo
+```
+
+Read **reloadConfigSuccess** (false means the last reload failed and the old config still runs), **corruptionCount** (WAL corruption repaired since start), **storageRetention** and **goroutineCount**. The same call on `/api/v1/status/buildinfo` gives the **version**.
+
+```sh
+curl -s http://HOST:9090/api/v1/targets?state=active | jq -r '.data.activeTargets[] | select(.health != "up") | [.scrapePool, .scrapeUrl, .lastError] | @tsv'
+```
+
+One line per target that is not up: the job, the URL it scrapes and why it failed. The **lastError** text names the cause: see the errors group at the end of this section.
+
+```sh
+promtool query instant http://HOST:9090 'up == 0'
+```
+
+Every target that failed its last scrape, with its `job` and `instance` labels. Empty output is healthy. Use `count by (job) (up == 0)` for a count per job.
+
+```sh
+promtool query instant http://HOST:9090 'absent(up{job="JOB"})'
+```
+
+Returns `1` when no `up` series exists for the job at all: the job was removed from the config, or service discovery found nothing. A job that is down still has `up == 0`, so it does not match here.
+
+```sh
+promtool check config FILE; promtool check rules FILE
+```
+
+Parses the config and every rule file it names, and prints `SUCCESS` for each. Run it before every reload. Typical failures: a YAML error with its line number, an unknown duration unit, a missing rule file.
+
+```sh changes
+curl -s -X POST http://HOST:9090/-/reload
+```
+
+Reloads the config and rule files without a restart. An empty reply with HTTP 200 is success; HTTP 500 means the new config was rejected and the old one keeps running (the log has `Error reloading config`). HTTP 403 `Lifecycle API is not enabled.` means the server runs without `--web.enable-lifecycle`: send `kill -HUP PID` instead.
+
+```sh
+curl -s http://HOST:9090/api/v1/rules | jq -r '.data.groups[].rules[] | select(.health != "ok") | [.name, .lastError] | @tsv'
+```
+
+Rules whose last evaluation failed, with the error. An empty result is healthy. A rule that errors never fires and never records, so a broken alert looks the same as a quiet one.
+
+```sh
+curl -s http://HOST:9090/api/v1/alerts | jq -r '.data.alerts[] | [.labels.alertname, .state, .activeAt] | @tsv'
+```
+
+Alerts Prometheus holds now. **pending** is still inside the rule's `for` time; **firing** is sent to Alertmanager. An alert missing here never reached Alertmanager, so look at the rule. One that fires here but is not in Alertmanager points to the notifier.
+
+```sh
+journalctl -u APP --since "1 hour ago" | grep -E 'level=(WARN|ERROR)'
+```
+
+Prometheus 3 logs `key=value` lines with an upper-case `level`. Most scrape failures are not logged at the default level: read them from the targets API. The warnings and errors here are rule failures, WAL repairs, remote write failures and notifier errors.
+
+### Prometheus: queries for a host or service
+
+```sh
+promtool query instant http://HOST:9090 '1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))'
+```
+
+CPU busy fraction per host over five minutes, from node_exporter: 1 is every core busy. Above about 0.9 for several minutes the host is saturated. For one hot process, look at `process_cpu_seconds_total` instead.
+
+```sh
+promtool query instant http://HOST:9090 '1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes'
+```
+
+Fraction of memory in use, counting cache as free the way the kernel does. Above 0.9 for a long time means real pressure. Compare with `process_resident_memory_bytes` to find the process.
+
+```sh
+promtool query instant http://HOST:9090 'predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0'
+```
+
+Filesystems that the last six hours of trend will fill within a day. Each line is a mount that runs out. Empty output is healthy. Use a shorter window such as `[1h]` and `4*3600` for a fast leak.
+
+```sh
+promtool query instant http://HOST:9090 'sum(rate(http_requests_total{job="JOB",code=~"5.."}[5m])) / sum(rate(http_requests_total{job="JOB"}[5m]))'
+```
+
+Share of requests that returned a 5xx. Replace `http_requests_total` and `code` with the names your service exports. No output means the metric or the label does not exist for that job. It can also mean no 5xx since the last restart: many client libraries create the `5xx` series on the first error.
+
+### Prometheus: cardinality and memory
+
+```sh
+curl -s 'http://HOST:9090/api/v1/status/tsdb?limit=10' | jq '.data.seriesCountByMetricName'
+```
+
+The ten metric names with the most series in the head block, plus **headStats.numSeries** in the full reply. The first names are the cause of a memory climb: look for a label that holds an ID, a URL or a user. Other keys: `labelValueCountByLabelName`, `seriesCountByLabelValuePair`.
+
+```sh
+promtool query instant http://HOST:9090 'topk(10, count by (__name__) ({__name__=~".+"}))'
+```
+
+The same ranking from a query. It reads every series, so on a large server it can hit the sample limit or time out: use the TSDB status call first. It only sees series that are stored: a target that fails with `sample limit exceeded` has no series here.
+
+### Prometheus: storage, ingestion and notifications
+
+```sh
+promtool query instant http://HOST:9090 'increase(prometheus_tsdb_compactions_failed_total[1h]) > 0 or increase(prometheus_tsdb_wal_corruptions_total[1h]) > 0 or increase(prometheus_tsdb_reloads_failures_total[1h]) > 0'
+```
+
+Any output means the TSDB had a compaction failure, a WAL corruption or a block reload failure in the last hour. Read the log for the first error. Compaction failures usually mean a full disk or bad permissions on the data directory.
+
+```sh
+promtool query instant http://HOST:9090 'increase(prometheus_target_scrapes_sample_out_of_order_total[15m]) > 0 or increase(prometheus_target_scrapes_sample_duplicate_timestamp_total[15m]) > 0 or increase(prometheus_target_scrapes_sample_out_of_bounds_total[15m]) > 0'
+```
+
+Samples the TSDB refused: out of order, a repeated timestamp with a different value, or a timestamp outside the head window. These counters carry no target label, so the target comes from the `WARN` log line (`target=`). Two targets exposing the same series, or an exporter that sets its own timestamps, cause these.
+
+```sh
+promtool query instant http://HOST:9090 'rate(prometheus_notifications_errors_total[5m]) > 0 or increase(prometheus_notifications_dropped_total[5m]) > 0'
+```
+
+Alerts that failed to reach an Alertmanager, by `alertmanager` label. Check that address first. `prometheus_notifications_alertmanagers_discovered` shows how many Alertmanagers Prometheus knows; `curl -s http://HOST:9090/api/v1/alertmanagers` lists their URLs.
+
+```sh
+promtool query instant http://HOST:9090 'prometheus_remote_storage_highest_timestamp_in_seconds - ignoring(remote_name, url) group_right(instance) prometheus_remote_storage_queue_highest_sent_timestamp_seconds'
+```
+
+Remote write lag in seconds for each endpoint. A few seconds is normal; a value that grows is a backlog. A value near the current Unix time means nothing has been sent yet. Pair it with the failure rate below.
+
+```sh
+promtool query instant http://HOST:9090 'rate(prometheus_remote_storage_samples_failed_total[5m]) > 0 or rate(prometheus_remote_storage_samples_retried_total[5m]) > 0'
+```
+
+Failed samples are dropped for good (a 4xx reply); retried samples are being resent (a 5xx or a network error). The `url` label names the endpoint. The log says why: see the errors group. `prometheus_remote_storage_shards` at `shards_max` means the queue cannot keep up.
+
+### Alertmanager: look first
+
+```sh
+amtool --alertmanager.url=http://HOST:9093 alert query -o extended
+```
+
+Active alerts Alertmanager holds now, with all labels and the start and end time. Silenced and inhibited alerts are hidden by default, so an alert missing here may be suppressed rather than lost: run the next command before you decide it never arrived. If it is in neither list, check the notifier.
+
+```sh
+amtool --alertmanager.url=http://HOST:9093 alert query --inhibited; amtool --alertmanager.url=http://HOST:9093 alert query --silenced
+```
+
+The suppressed alerts, one list for each reason, with **State** `suppressed`. An alert in the first list is held back by an inhibit rule because a more severe one fires; one in the second matches a silence. This is the usual answer to "the alert fired and nobody was told".
+
+```sh
+curl -s http://HOST:9093/metrics | grep -E '^alertmanager_cluster_(members|failed_peers|health_score)'
+```
+
+**alertmanager_cluster_members** should equal the number of Alertmanagers in the HA set. A lower number on each node means they do not gossip, and each node sends its own notifications, so every alert pages more than once. `amtool cluster show` prints `Cluster Status:  ready`, or `disabled` when clustering is off. Prometheus must send to every instance.
+
+```sh
+amtool --alertmanager.url=http://HOST:9093 silence query
+```
+
+Active silences with their **ID**, matchers, end time, author and comment. Add `--expired` to see the ones that ended. A silence with broad matchers or no end that nobody remembers is a common cause of missed pages.
+
+```sh changes
+amtool --alertmanager.url=http://HOST:9093 silence add alertname=TargetDown --duration=2h --comment="reason, ticket" --author="your name"
+```
+
+Mutes alerts that match every matcher, for the duration, and prints the new silence ID. Alerts still fire and show as `suppressed`. Never silence `Watchdog` or any dead-man alert. Match on more than `alertname` when you can.
+
+```sh changes
+amtool --alertmanager.url=http://HOST:9093 silence expire ID
+```
+
+Ends a silence now and prints nothing on success. The alerts it muted notify again at the next group interval. `silence query -q` prints only the IDs, to feed this command.
+
+```sh
+amtool check-config FILE
+```
+
+Checks the Alertmanager config and counts routes, inhibit rules, receivers and templates. A broken file ends with `FAILED:` and the cause, such as `undefined receiver "oncall" used in route`.
+
+```sh
+amtool config routes show --config.file=FILE; amtool config routes test --config.file=FILE severity=page alertname=TargetDown
+```
+
+The first command prints the routing tree; the second prints the receiver an alert with those labels would reach. Add `--verify.receivers=RECEIVER` to make the exit code 1 when the receiver differs. Use it to find a route that sends alerts to the wrong place.
+
+```sh changes
+curl -s -X POST http://HOST:9093/-/reload
+```
+
+Reloads the config. HTTP 500 means the file was rejected and the old config stays active; the log has `Loading configuration file failed`. `alertmanager_config_last_reload_successful` is 0 after a failed reload. Run `amtool check-config` first.
+
+```sh
+curl -s http://HOST:9093/metrics | grep -E '^alertmanager_(notifications_failed_total|notification_requests_failed_total)' | grep -v ' 0$'
+```
+
+Notification failures per `integration`. Notification failures per `integration`. **notifications_failed_total** carries a `reason`: `serverError` is a 5xx from the receiver, `clientError` a 4xx, `rateLimited` a 429, `contextDeadlineExceeded` a timeout. A refused connection is counted as `other`. No output means no failures since the last start.
+
+### Prometheus and Alertmanager errors
+
+```text
+Get "http://192.0.2.10:9100/metrics": dial tcp 192.0.2.10:9100: connect: connection refused
+Get "http://app.example.net:9100/metrics": dial tcp: lookup app.example.net on 127.0.0.53:53: no such host
+```
+
+The first: nothing listens on that port, or a firewall rejects it; test with `curl` from the Prometheus host. The second: the name does not resolve from the Prometheus host, so check the resolver it uses (shown after `on`) and the service discovery that produced the name.
+
+```text
+Get "http://192.0.2.10:9100/metrics": context deadline exceeded
+```
+
+The target accepted the connection but did not finish the reply inside `scrape_timeout`. The `scrape_duration_seconds` metric for the target shows how close it runs to the limit. Fix a slow exporter first; raise `scrape_timeout` only when the target is honestly big.
+
+```text
+server returned HTTP status 401 Unauthorized
+server returned HTTP status 404 Not Found
+```
+
+The target answers but refuses or lacks the path. A 401 needs `authorization` or `basic_auth` in the scrape config. A 404 is a wrong `metrics_path` or a port that serves something else. Test the URL with `curl -i`.
+
+```text
+received unsupported Content-Type "text/html" and no fallback_scrape_protocol specified for target
+```
+
+The endpoint returned a page that is not a metrics format, often a login page, a proxy error or the wrong path. Prometheus 3 refuses a missing or unknown `Content-Type`. Fix the endpoint; set `fallback_scrape_protocol` (for example `PrometheusText0.0.4`) only when it really serves that format.
+
+```text
+sample limit exceeded
+```
+
+The target's **lastError** when a job sets `sample_limit` and one scrape returned more samples. The whole scrape is rejected and its series go stale, so the target is down and its series are not in the TSDB. Compare `scrape_samples_scraped{job="JOB"}` with the limit, and count names in the target's own output with `curl -s URL | cut -d'{' -f1 | sort | uniq -c | sort -rn | head`.
+
+```text
+level=WARN source=group.go:548 msg="Evaluating rule failed" component="rule manager" file=/etc/prometheus/rules.yml group=demo name=bad:many err="found duplicate series for the match group {} on the left hand-side of the operation: [...];many-to-many matching not allowed: matching labels must be unique on one side"
+```
+
+A rule's expression matched more than one series on a side where it needs one. Run the expression in a query to see the series, then add labels to `on(...)` or `ignoring(...)`, or aggregate first. The rule shows `health: err` in the rules API.
+
+```text
+level=WARN msg="Error on ingesting out-of-order samples" component="scrape manager" scrape_pool=JOB target=http://192.0.2.10:9100/metrics num_dropped=1
+level=WARN msg="Error on ingesting samples with different value but same timestamp" component="scrape manager" scrape_pool=JOB target=http://192.0.2.10:9100/metrics num_dropped=1
+```
+
+The target exposes a sample with its own timestamp that is older than the last stored one, or repeats a timestamp with a new value. The sample is dropped. Remove the explicit timestamps in the exporter, or find two targets that produce the same series.
+
+```text
+level=WARN source=queue_manager.go:2408 msg="Failed to send batch, retrying" component=remote remote_name=rwdest url=http://192.0.2.10:9201/write err="server returned HTTP status 500 Internal Server Error: boom"
+level=ERROR source=queue_manager.go:2042 msg="non-recoverable error" component=remote remote_name=rwdest url=http://192.0.2.10:9201/write failedSampleCount=1483 err="server returned HTTP status 400 Bad Request: bad samples"
+```
+
+A 5xx or network error is retried while the queue holds the samples. Prometheus truncates the WAL on schedule (about every two hours), so an outage longer than that loses the oldest samples; the disk does not fill. A 4xx is non-recoverable: those samples are dropped. Read the receiver's own log for the cause of the 400.
+
+```text
+level=WARN source=db.go:1241 msg="Encountered WAL read error, attempting repair" component=tsdb err="read records: corruption in segment /prometheus/wal/00000000 at 18066: unexpected checksum 5e40df53, expected c1927e54"
+```
+
+The WAL has a damaged record, usually after a crash or a full disk. Prometheus then logs `Successfully repaired WAL` and drops the damaged segment and every later one, which loses the most recent samples. Alert on `prometheus_tsdb_wal_corruptions_total`.
+
+```text
+level=ERROR source=main.go:1678 msg="Fatal error" err="opening storage failed: lock DB directory: resource temporarily unavailable"
+```
+
+Another Prometheus process holds the data directory. Find it with `ps`, often an old instance still running or two units sharing one path. Stop the extra one. Never delete the `lock` file under a live process.
+
+```text
+level=ERROR source=main.go:1442 msg="Error reloading config" err="couldn't load configuration (--config.file=\"/etc/prometheus/prometheus.yml\"): parsing YAML file /etc/prometheus/prometheus.yml: yaml: line 33: did not find expected '-' indicator"
+```
+
+The reload was rejected and the old config still runs; **reloadConfigSuccess** is false. Run `promtool check config FILE` for the same error with its line number. Fix the file and reload again.
+
+```text
+level=ERROR source=scrape.go:1527 msg="Scrape commit failed" component="scrape manager" scrape_pool=JOB target=http://192.0.2.10:9100/metrics err="write to WAL: log samples: write /prometheus/wal/00000000: no space left on device"
+```
+
+The data volume is full, so new samples are lost until space returns. Free space or grow the volume, and see what holds it with `du -sh DATADIR/*`. A size limit (`--storage.tsdb.retention.size`, deprecated in 3.16 in favour of the config-file setting) deletes old blocks early; keep it well below the volume size.
+
+```text
+level=WARN source=cluster.go:271 msg="failed to join cluster" component=cluster err="1 error occurred:\n\t* failed to resolve am2.example.net:9094: lookup am2.example.net on 127.0.0.53:53: no such host\n\n"
+level=ERROR source=main.go:234 msg="alertmanager exited with error" err="unable to initialize gossip mesh: create memberlist: failed to get final advertise address: failed to parse advertise address \"am1.example.net\""
+```
+
+The first: this Alertmanager cannot reach its `--cluster.peer`, so it runs alone and retries every 10 seconds; with no gossip, every instance notifies and the receiver gets duplicates. The second: `--cluster.advertise-address` must be an IP address, not a name.
+
+```text
+level=ERROR source=sendloop.go:239 msg="Error sending alerts" component=notifier alertmanager=http://alerts.example.net:9093/api/v2/alerts count=1 err="Post \"http://alerts.example.net:9093/api/v2/alerts\": dial tcp: lookup alerts.example.net on 127.0.0.53:53: no such host"
+```
+
+Prometheus cannot reach that Alertmanager, here for a DNS reason; a refused or timed-out connection prints the dial error instead. Alerts for it are dropped, counted in `prometheus_notifications_dropped_total`. With several Alertmanagers, one failing does not stop the others.
+
+```text
+level=ERROR source=coordinator.go:117 msg="Loading configuration file failed" component=configuration file=/etc/alertmanager/alertmanager.yml err="undefined receiver \"oncall\" used in route"
+```
+
+Alertmanager rejected the new config and keeps the old one. A route names a receiver that is not defined, a common typo after a rename. `amtool check-config FILE` prints the same error before the reload.
+
+```text
+level=WARN source=retry_stage.go:174 msg="Notify attempt failed, will retry later" component=dispatcher receiver=oncall integration=webhook[0] attempts=1 reason=serverError err="unexpected status code 500: hook broke"
+level=WARN source=retry_stage.go:174 msg="Notify attempt failed, will retry later" component=dispatcher receiver=oncall integration=webhook[0] attempts=1 reason=other err="Post \"<redacted>\": dial tcp 192.0.2.30:9: connect: connection refused"
+level=ERROR source=dispatch.go:642 msg="Notify for alerts failed" component=dispatcher num_alerts=1 receiver=oncall err="oncall/webhook[0]: notify retry canceled after 6 attempts: unexpected status code 500: hook broke"
+```
+
+The receiver rejected or did not answer the notification. The first and third lines show a 5xx, the second a refused connection (the URL is redacted in the log, so read it from the config). After the retries run out the notification is tried again at the next `group_interval` flush, so it is not lost until `repeat_interval`. Test the receiver URL with `curl`.
+
+```text
+level=DEBUG source=mute.go:117 msg="Notifications will not be sent for muted alerts" component=dispatcher alerts=[WarnDemo[6f1a394][active]] reason=inhibition
+```
+
+An alert held back on purpose, with `reason=inhibition`. It appears only at `--log.level=debug`, so run `amtool alert query --inhibited` when the log is quiet. If the alert is not in Alertmanager at all, check the notifier on the Prometheus side.
+
+## OpenTelemetry Collector
+
+The Collector sits between your apps and a backend, so most failures are a pipeline that drops data: a backend that is down or slow, a TLS mismatch, a full queue, or the memory limiter refusing data. Read the Collector's own log and its own metrics before the backend. Commands run on the Collector host. The binary is `otelcol-contrib` (the `otelcol` distribution has fewer components); the image is `otel/opentelemetry-collector-contrib`. Defaults used here: OTLP gRPC on 4317, OTLP HTTP on 4318, and the Collector's own metrics on 8888, which listens on localhost only unless `service::telemetry::metrics::readers` binds another address. The `health_check` (13133) and `zpages` (55679) extensions work only when your config enables them. Output is from Collector 0.165; metric names print without a `_total` suffix here, older releases add it.
+
+### Collector: look first
+
+```sh
+otelcol-contrib --version
+```
+
+Prints `otelcol-contrib version 0.165.0` or the version you run. Components are renamed and removed across releases, and a config that works on one version can fail on the next, so compare with the version the config was written for.
+
+```sh
+otelcol-contrib validate --config=FILE
+```
+
+Loads the config and checks every component and pipeline reference without starting anything. No output and exit code 0 means valid; any problem prints one `Error:` line and exits 1. Run it before every restart and rollout.
+
+```sh
+otelcol-contrib components | grep 'name: otlp'
+```
+
+Shows whether a receiver, processor, exporter or extension (here `otlp`, change it to the one you need) is compiled into this build. A component that is missing fails config load with `unknown type`. The core `otelcol` build carries only a few; the contrib build carries most.
+
+```sh
+curl -s http://HOST:13133/
+```
+
+The `health_check` extension: `{"status":"Server available","upSince":...,"uptime":...}` means the Collector runs. It does not prove data flows: an exporter can fail on every request while this stays healthy.
+
+```sh
+ss -ltnp | grep -E ':(4317|4318|8888|13133|55679) '
+```
+
+Which process listens on the Collector's ports. A missing 4317 or 4318 means the receiver did not start; check the log for `bind: address already in use`. On a host where Docker publishes the port, `docker-proxy` shows here.
+
+```sh changes
+curl -si -H 'Content-Type: application/json' -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"triage-test"}}]},"scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","name":"triage","kind":1,"startTimeUnixNano":"1544712660000000000","endTimeUnixNano":"1544712661000000000"}]}]}]}' http://HOST:4318/v1/traces
+```
+
+Sends one test span to the OTLP HTTP receiver, and it reaches the backend. `200` with `{"partialSuccess":{}}` means accepted. `503` with `data refused due to high memory usage` is the memory limiter; `415` is a wrong `Content-Type`. Add a `debug` exporter to see the span in the log.
+
+```sh
+curl -s http://HOST:8888/metrics | grep -E '^otelcol_(receiver_(accepted|refused|failed)|exporter_(sent|send_failed|enqueue_failed))'
+```
+
+The Collector's own counts. **receiver_refused** is data a processor turned away (the memory limiter) or a full queue pushed back; **exporter_send_failed** is data the backend did not take. A **sent** counter that stops rising while **accepted** rises is a pipeline that drops. Labels name the exporter and the error type.
+
+```sh
+curl -s http://HOST:8888/metrics | grep -E '^otelcol_exporter_queue_(size|capacity)'
+```
+
+Queue use for each exporter. A **size** near **capacity** means the backend is slower than the input, and the next lines in the log say `sending queue is full`. A queue that sits at zero while data is lost points at the receiver or a processor.
+
+```sh
+promtool query instant http://HOST:9090 'sum by (exporter) (rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)(_total)?"}[5m])) > 0'
+```
+
+For a Prometheus that scrapes the Collector: the exporters that are failing now, for any signal. Empty is healthy. The `error_type` label on the raw series (`Unavailable`, `DeadlineExceeded`, `Unauthenticated`) tells you what to look for in the log.
+
+```sh
+curl -s http://HOST:55679/debug/pipelinez
+```
+
+The `zpages` extension lists each pipeline with its receivers, processors and exporters. It confirms what the running Collector built, which can differ from the file you edited. `/debug/servicez` shows the version and runtime, and `/debug/extensionz` the extensions.
+
+```sh
+journalctl -u APP --since "30 min ago" | grep -E '[[:space:]](warn|error)[[:space:]]'
+```
+
+The Collector logs tab-separated lines with a lower-case level. Start at the first `error` after the failure began. Keep the messages that say `Exporting failed`; the errors group at the end of this section explains each one.
+
+```sh changes
+kill -HUP PID
+```
+
+Makes the Collector reload its config and restart its pipelines in place, without a new process. Data in flight and in the queues is lost, so run `validate` first.
+
+### OpenTelemetry Collector errors
+
+```text
+Exporting failed. Dropping data.	"error": "not retryable error: Permanent error: rpc error: code = Unimplemented desc = error exporting items, request to http://backend:4318/v1/traces responded with HTTP Status Code 404", "dropped_items": 50
+```
+
+The backend returned a permanent HTTP error, so the Collector drops the batch and does not retry. A 404 is a wrong endpoint or path: `otlphttp` adds `/v1/traces` to the endpoint, so do not put it there yourself. A 401 shows as `Unauthenticated`: check the `headers` and credentials.
+
+```text
+Exporting failed. Will retry the request after interval.	"error": "rpc error: code = Unavailable desc = no children to pick from", "interval": "744.246657ms"
+```
+
+An info line, not yet a loss. gRPC found no address for the endpoint: the name does not resolve, or nothing answers. Check the `endpoint` with `getent hosts` and `nc -vz`. The Collector retries with growing intervals until `max_elapsed_time`.
+
+```text
+Exporting failed. Dropping data.	"error": "no more retries left: rpc error: code = DeadlineExceeded desc = context deadline exceeded while waiting for connections to become ready", "dropped_items": 50
+```
+
+Retries ran out: the backend accepted no connection inside the exporter `timeout`. For a slow or hung backend, test with `nc -vz HOST PORT` from the Collector host. The data is lost, so size the queue and `max_elapsed_time` for the outage you expect.
+
+```text
+Exporting failed. Will retry the request after interval.	"error": "failed to make an HTTP request: Post \"http://backend:4318/v1/traces\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)", "interval": "6.236881119s"
+```
+
+The backend took the connection and did not answer within the exporter `timeout` (30s for `otlphttp`, 5s for the gRPC `otlp` exporter). The backend is overloaded or a proxy is holding the request. Raise `timeout` only after the backend is healthy. With `retry_on_failure.enabled: false` the same error ends in `Exporting failed. Dropping data. Try enabling retry_on_failure config option to retry on retryable errors.`
+
+```text
+Exporting failed. Rejecting data.	"error": "sending queue is full", "rejected_items": 50
+```
+
+The exporter's `sending_queue` is full because the backend is slower than the input, so new data is refused and the batch processor logs `Sender failed`. Over HTTP the sender sees a 503. Older releases word it `Dropping data because sending_queue is full. Try increasing queue_size.`
+
+```text
+Exporting failed. Dropping data.	"error": "no more retries left: rpc error: code = Unavailable desc = error exporting items, request to http://backend:4318/v1/traces responded with HTTP Status Code 503", "dropped_items": 50
+```
+
+The backend answered 503 on every retry until `max_elapsed_time`. Look at the backend's own health and logs. A 502 or 504 is retried the same way and usually points at a load balancer in front of the backend.
+
+```text
+Exporting failed. Will retry the request after interval.	"error": "rpc error: code = ResourceExhausted desc = error exporting items, request to http://backend:4318/v1/traces responded with HTTP Status Code 429", "interval": "1.132719217s"
+```
+
+The backend is rate limiting. The Collector retries with growing intervals until `max_elapsed_time`. If it keeps happening, lower the load (a `batch` processor sends fewer, larger requests) or raise the quota.
+
+```text
+"error": "no more retries left: rpc error: code = Unavailable desc = connection error: desc = \"transport: authentication handshake failed: tls: failed to verify certificate: x509: certificate signed by unknown authority\""
+```
+
+The exporter uses TLS and does not trust the backend's certificate. Set `tls.ca_file` to the issuing CA. Do not use `insecure_skip_verify` outside a test. An expired certificate prints an `x509: certificate has expired or is not yet valid` error here instead.
+
+```text
+"error": "no more retries left: rpc error: code = Unavailable desc = connection error: desc = \"transport: authentication handshake failed: tls: first record does not look like a TLS handshake\""
+```
+
+The exporter speaks TLS to a backend that speaks plain text: the port is not the TLS port, or the backend has no TLS. Use the right port, or set `tls.insecure: true` for a plain backend inside a trusted network.
+
+```text
+"error": "no more retries left: rpc error: code = Unavailable desc = connection error: desc = \"error reading server preface: EOF\""
+```
+
+The exporter sends plain text (`tls.insecure: true`) to a backend that requires TLS and closed the connection. Remove `insecure` and set `tls.ca_file`. The same text appears when the port is not a gRPC server at all.
+
+```text
+"error": "failed to make an HTTP request: Post \"https://backend:4318/v1/traces\": http: server gave HTTP response to HTTPS client"
+```
+
+The `endpoint` says `https://` but the backend serves plain HTTP. Use `http://` for a plain backend, or fix the port.
+
+```text
+"error": "failed to make an HTTP request: Post \"http://backend:9999/v1/traces\": dial tcp 192.0.2.10:9999: connect: connection refused"
+```
+
+Nothing listens on that address and port, or a firewall rejects it. Check the `endpoint` port against the backend's OTLP port (4317 for gRPC, 4318 for HTTP), and test with `nc -vz HOST PORT` from the Collector host.
+
+```text
+warn	memorylimiter@v0.165.0/memorylimiter.go:284	Memory usage is above hard limit. Forcing a GC.	"cur_mem_mib": 27
+warn	memorylimiter@v0.165.0/memorylimiter.go:303	Memory usage is above soft limit. Refusing data.	"cur_mem_mib": 24
+```
+
+The `memory_limiter` processor sees more memory in use than `limit_mib` (hard) or `limit_mib` minus `spike_limit_mib` (soft). It forces a garbage collection, then refuses incoming data until memory drops. Receivers return 503 and count `otelcol_receiver_refused_*`.
+
+```text
+{"code":14, "message":"data refused due to high memory usage"}
+```
+
+The reply a client gets when the memory limiter refuses its data: HTTP 503 here, gRPC code 14 (`Unavailable`) there. The sender should retry. Raise the memory limit, add a `batch` processor after the limiter, or cut the input. Set `limit_mib` below the container limit.
+
+```text
+Error: cannot start pipelines: failed to start "otlp" receiver: listen tcp 0.0.0.0:4317: bind: address already in use
+```
+
+Another process, often a second Collector or an agent, owns the receiver port. Find it with `ss -ltnp`, then stop it or change the receiver's `endpoint`. Nothing starts: the Collector exits instead of running with a pipeline missing.
+
+```text
+Error: failed to create meter provider: binding address localhost:8888 for Prometheus exporter: listen tcp 127.0.0.1:8888: bind: address already in use
+```
+
+The Collector's own metrics port is taken, commonly by a second Collector on the same host. Move it with `service::telemetry::metrics::readers`, a `pull` reader with a different `port`.
+
+```text
+Error: service::pipelines::traces: references processor "batch" which is not configured
+```
+
+A pipeline names a component that has no definition under `processors:`, `receivers:` or `exporters:`. Add the definition or remove the name. The same shape covers a missing exporter or extension.
+
+```text
+'protocols.grpc' decoding failed due to the following error(s):
+'configgrpc.ServerConfig' has invalid keys: endpont
+```
+
+A key is misspelled or does not exist for that component or version. The error lists the bad key. Check the component's README for the current key names; options are renamed between releases.
+
+```text
+Error: exporters::otlphttp/backend::retry_on_failure: 'max_elapsed_time' must not be less than 'max_interval'
+```
+
+The retry settings contradict each other. `max_interval` defaults to 30s, so a short `max_elapsed_time` fails validation. Set `max_interval` below `max_elapsed_time`, or `max_elapsed_time: 0` to retry without a time limit.
+
+```text
+Error: exporters::otlp: requires a non-empty "endpoint"
+Error: invalid configuration: exporters::otlp/backend::clientconfig: address backend: missing port in address
+```
+
+The first: an exporter without an `endpoint`, or one set from an unset `${env:VAR}` that expands to an empty string. The second: a gRPC endpoint needs `host:port`. Both stop `validate` and the start.
+
+```text
+"otlp" alias is deprecated; use "otlp_grpc" instead
+"otlphttp" alias is deprecated; use "otlp_http" instead
+```
+
+A warning that the component type has a new name. The config still works in 0.165, but a later release can drop the old name, so change `otlp` to `otlp_grpc` and `otlphttp` to `otlp_http` in the config before upgrading.
+
+```text
+415 unsupported media type, supported: [application/json, application/x-protobuf]
+{"code":3, "message":"ReadObject: expect \" after {, but found b, error found in #2 byte of ...|{bad|..., bigger context ...|{bad|..."}
+```
+
+Replies from the OTLP HTTP receiver. A 415 is a wrong `Content-Type`; a 400 is a body that does not parse as OTLP. Sending HTTP to the gRPC port 4317 gives a reset connection instead, and GET on a signal path gives 405. Check the client's protocol setting.
 
 ## Message queues
 
@@ -8414,6 +10338,330 @@ MongoServerSelectionError: connection <monitor> to 127.0.0.1:27017 closed
 ```
 
 The server accepted and closed the connection: it is at its connection limit, or it is shutting down. The log has `Connection refused because there are too many open connections`. Compare `db.serverStatus().connections` with `net.maxIncomingConnections`, and find the leak.
+
+## ClickHouse
+
+ClickHouse breaks in a few ways: a server runs out of memory, inserts make too many small parts, a mutation or a merge never finishes, a replica goes read-only when its Keeper session drops, or an `ON CLUSTER` statement waits for a host that is down. Everything is a table in `system`, so most triage is a `SELECT`.
+
+Commands run on the ClickHouse host (or inside the container) with `clickhouse-client`, which talks to port 9000, or 9440 with `--secure`. `--ask-password` prompts for the password so it never sits in history. Output is from ClickHouse 26.8 LTS; the error strings, the part limits and the async-insert default were also checked on 25.8. Keeper commands run from any host that can reach its client port (9181 is the usual one) and need `nc` or `clickhouse-keeper-client`. Cluster-wide queries use the cluster name from `system.clusters` in place of CHCLUSTER, and the Keeper-backed entries assume a replicated table.
+
+### ClickHouse: connect and look
+
+```sh
+clickhouse-client --host HOST --port PORT --user DBUSER --ask-password
+```
+
+Opens a prompt after asking for the password. Add `--secure` for TLS. Start here to prove the server answers; an `AUTHENTICATION_FAILED` or a hang points at the user, the port or the network before any query does.
+
+```sql
+SELECT version(), formatReadableTimeDelta(uptime()) AS uptime, hostName();
+```
+
+The version, how long the server has been up, and which host you reached. An uptime of a few minutes means a restart: check the kernel log for an OOM kill (`journalctl -k | grep -i 'out of memory'`) and the error log below.
+
+```sh
+tail -n 50 /var/log/clickhouse-server/clickhouse-server.err.log
+```
+
+Warnings and errors only, a smaller file than `clickhouse-server.log`. In a container use `docker logs --tail 50 NAME` instead. Read from the earliest error of the incident, not the last line.
+
+```sql
+SELECT name, code, value, last_error_time, last_error_message FROM system.errors ORDER BY last_error_time DESC LIMIT 5;
+```
+
+The error codes the server has raised since start, with a count in **value** and the last message. A code whose **value** climbs while you watch is the live one. The names match the ones at the end of each error message.
+
+```sql
+SELECT metric, value FROM system.metrics WHERE metric IN ('Query','Merge','PartMutation','ReadonlyReplica','DelayedInserts','MemoryTracking','BackgroundMergesAndMutationsPoolTask','BackgroundMergesAndMutationsPoolSize') ORDER BY metric;
+```
+
+What the server is doing now. **ReadonlyReplica** above 0 means a replicated table cannot take writes. **DelayedInserts** above 0 means inserts are being slowed for too many parts. **MemoryTracking** is bytes in use. **BackgroundMergesAndMutationsPoolTask** equal to **BackgroundMergesAndMutationsPoolSize** means every merge slot is busy.
+
+```sql
+SELECT metric, value FROM system.asynchronous_metrics WHERE metric IN ('MemoryResident','OSMemoryAvailable','MaxPartCountForPartition','ReplicasMaxAbsoluteDelay','ReplicasMaxQueueSize','TotalPartsOfMergeTreeTables') ORDER BY metric;
+```
+
+Slow-moving gauges, refreshed about every second. **MaxPartCountForPartition** near `parts_to_delay_insert` (1000 by default) is the early warning for "Too many parts". **ReplicasMaxAbsoluteDelay** is the worst replica lag in seconds.
+
+```sh
+curl -s http://HOST:8123/replicas_status
+```
+
+Prints `Ok.` when every replicated table on this host is writable and caught up; otherwise the HTTP status is 503. Add `?verbose=1` to list each table with its delay. Port 8123 is the default HTTP port; `/ping` answers `Ok.` as a plain liveness check.
+
+### ClickHouse: running and slow queries
+
+```sql
+SELECT query_id, user, elapsed, formatReadableSize(memory_usage) AS mem, read_rows, substring(query, 1, 80) AS q FROM system.processes ORDER BY elapsed DESC;
+```
+
+Every query running now, longest first. Your own query is in the list. A large **mem** or an **elapsed** in minutes is the suspect; take its **query_id** for the kill below.
+
+```sql changes
+KILL QUERY WHERE query_id = 'ID'
+```
+
+Asks the server to cancel that query; the client that ran it gets `QUERY_WAS_CANCELLED`. The output shows `waiting` until it stops. Add `SYNC` to wait for it, or `TEST` to list what would be killed without killing it.
+
+```sql
+SYSTEM FLUSH LOGS;
+SELECT event_time, query_duration_ms, formatReadableSize(memory_usage) AS mem, read_rows, formatReadableSize(read_bytes) AS read, normalizeQuery(query) AS q FROM system.query_log WHERE type = 'QueryFinish' AND is_initial_query AND event_date >= today() - 1 AND event_time > now() - INTERVAL 1 HOUR ORDER BY query_duration_ms DESC LIMIT 10;
+```
+
+The slowest finished queries of the last hour. `system.query_log` is written in batches, so flush first. **read_rows** in the billions for a short filter means the primary key was not used; `normalizeQuery` groups queries that differ only in values.
+
+```sql
+SELECT errorCodeToName(exception_code) AS error, count() AS n, any(normalizeQuery(query)) AS example FROM system.query_log WHERE type IN ('ExceptionBeforeStart', 'ExceptionWhileProcessing') AND event_date >= today() - 1 GROUP BY error ORDER BY n DESC LIMIT 10;
+```
+
+Failed queries by error name, with one example each. `ExceptionBeforeStart` rows failed before running (syntax, unknown table, access); `ExceptionWhileProcessing` rows failed mid-run (memory, timeout, cancelled). Read one in full with its `exception` column.
+
+### ClickHouse: memory
+
+```sql
+SELECT name, value FROM system.server_settings WHERE name IN ('max_server_memory_usage', 'max_server_memory_usage_to_ram_ratio', 'max_concurrent_queries', 'max_connections', 'background_pool_size');
+```
+
+The limits set in the server config. **max_server_memory_usage** is the effective cap in bytes: by default **max_server_memory_usage_to_ram_ratio** (0.9) of RAM, or of the container limit. A server near it rejects the next large allocation with the "(total) memory limit" error.
+
+```sql
+SELECT event_time, query_id, formatReadableSize(memory_usage) AS peak, read_rows, left(query, 80) AS q FROM system.query_log WHERE type = 'QueryFinish' AND event_date >= today() - 1 ORDER BY memory_usage DESC LIMIT 10;
+```
+
+The queries that used the most memory in the last two days. Compare **peak** with `max_memory_usage` and with the server limit: a few queries near the limit explain the memory errors at the end of this section. Memory held by merges, dictionaries and caches does not show here.
+
+```sql
+SELECT metric, formatReadableSize(value) AS size FROM system.metrics WHERE metric IN ('MemoryTracking', 'MergesMutationsMemoryTracking');
+SELECT name, status, formatReadableSize(bytes_allocated) AS size, last_exception FROM system.dictionaries ORDER BY bytes_allocated DESC LIMIT 5;
+```
+
+For a memory error while `system.processes` looks small. **MemoryTracking** is the server total; **MergesMutationsMemoryTracking** is what merges and mutations hold; a dictionary holds its **bytes_allocated** all the time. Caches and primary indexes count too and have no single table: see the `*Cache*` gauges in `system.asynchronous_metrics`.
+
+### ClickHouse: parts and merges
+
+```sql
+SELECT database, table, partition, count() AS parts, sum(rows) AS rows, formatReadableSize(sum(bytes_on_disk)) AS size FROM system.parts WHERE active GROUP BY database, table, partition ORDER BY parts DESC LIMIT 10;
+```
+
+Active parts per partition. Inserts are delayed at `parts_to_delay_insert` (1000 by default) and rejected at `parts_to_throw_insert` (3000) when one partition holds that many; `max_parts_in_total` (100000) caps the whole table. A partition key that is too fine multiplies the parts, and one insert that touches more than `max_partitions_per_insert_block` (100) partitions fails outright. Many tiny parts from frequent small inserts: batch 10,000 to 100,000 rows per insert, or use async inserts.
+
+```sql
+SELECT database, table, round(elapsed) AS seconds, round(progress * 100) AS pct, num_parts, formatReadableSize(total_size_bytes_compressed) AS size, formatReadableSize(memory_usage) AS mem, is_mutation, result_part_name FROM system.merges;
+```
+
+Merges and mutations running now. Empty with a high part count means merges are not running: a stopped merge, a full disk, or **BackgroundMergesAndMutationsPoolTask** at **BackgroundMergesAndMutationsPoolSize** in `system.metrics` (the pool size times `background_merges_mutations_concurrency_ratio`, 32 here). **is_mutation** 1 is an `ALTER` rewriting parts.
+
+```sql
+SELECT event_time, database, table, rows, status, left(exception, 120) AS exception FROM system.asynchronous_insert_log WHERE status != 'Ok' ORDER BY event_time DESC LIMIT 5;
+```
+
+Asynchronous inserts that failed to flush. `async_insert` is on by default in 26.8 and off in 25.8. With `wait_for_async_insert=1` the client gets the flush error itself (`TOO_MANY_PARTS`, `TABLE_IS_READ_ONLY`). With `wait_for_async_insert=0` the client sees success and a failed flush shows only here, as `FlushError`.
+
+```sql changes
+SYSTEM START MERGES DB.TABLENAME
+```
+
+Turns background merging back on for the table after someone ran `SYSTEM STOP MERGES`. No system table showed the stop in my runs, so suspect it when parts pile up, **BackgroundMergesAndMutationsPoolTask** is 0 and `system.merges` stays empty. Without a table name it applies to every table.
+
+### ClickHouse: mutations
+
+```sql
+SELECT database, table, mutation_id, command, create_time, parts_to_do, latest_failed_part, latest_fail_time, latest_fail_reason FROM system.mutations WHERE NOT is_done;
+```
+
+Every `ALTER ... UPDATE` or `DELETE` that has not finished. A **latest_fail_reason** means it fails on a part and retries forever, as in `FUNCTION_THROW_IF_VALUE_IS_NON_ZERO`; **parts_to_do** that does not fall with no failure means merges are stalled: check `system.merges` and the pool metrics.
+
+```sql changes
+KILL MUTATION WHERE database = 'DB' AND table = 'TABLENAME' AND mutation_id = 'ID'
+```
+
+Removes the mutation from the queue so it stops retrying. Parts it already rewrote stay rewritten, so the table can be half-updated. On a replicated table the kill applies to every replica. Fix the cause, then run the `ALTER` again.
+
+### ClickHouse: replication and Keeper
+
+```sql
+SELECT database, table, is_readonly, is_session_expired, absolute_delay, queue_size, inserts_in_queue, merges_in_queue, active_replicas, total_replicas, last_queue_update_exception, zookeeper_exception FROM system.replicas WHERE is_readonly OR is_session_expired OR absolute_delay > 60 OR queue_size > 100 OR active_replicas < total_replicas;
+```
+
+Replicated tables that are in trouble on this host; empty is healthy. **is_readonly** 1 with **is_session_expired** 1 is a lost Keeper session; **zookeeper_exception** names the Keeper error. **active_replicas** below **total_replicas** is a replica that is down. Those two columns cost a Keeper request per table, so on a host with hundreds of tables add `AND table = 'TABLENAME'` or run it less often.
+
+```sql
+SELECT hostName() AS host, database, table, is_readonly, absolute_delay, queue_size, active_replicas, total_replicas FROM clusterAllReplicas('CHCLUSTER', system.replicas) WHERE is_readonly OR absolute_delay > 60 OR queue_size > 100 OR active_replicas < total_replicas;
+```
+
+The same check on every replica of the cluster in one query; empty is healthy. Other hosts are reached as `default` unless the cluster says otherwise, which works only while `default` has no password; otherwise this fails with `AUTHENTICATION_FAILED` from the other host. Give the cluster a `<secret>` (the same text on every node) and the query runs as the user who asked, with no password in the XML.
+
+```sql
+SELECT database, table, type, num_tries, num_postponed, last_exception, postpone_reason FROM system.replication_queue WHERE last_exception != '' OR num_tries > 3 ORDER BY create_time LIMIT 10;
+```
+
+Replication tasks that fail or keep waiting. A **last_exception** shows why a fetch, merge or mutation cannot run. A **postpone_reason** such as "replicated fetches are cancelled now" means someone ran `SYSTEM STOP FETCHES`.
+
+```sql changes
+SYSTEM SYNC REPLICA DB.TABLENAME
+```
+
+Waits until this replica has run its replication queue, so reads here match the other replicas. It waits up to `receive_timeout` (300 seconds) and then fails with `TIMEOUT_EXCEEDED`; add `LIGHTWEIGHT` to wait only for the fetch-type entries already queued, and use `clickhouse-client --receive_timeout=30` to give up sooner.
+
+```sql changes
+SYSTEM RESTART REPLICA DB.TABLENAME
+```
+
+Detaches and re-attaches the table's storage without restarting the server, which opens a fresh Keeper session. Run it when Keeper is reachable again and the table is still read-only. Use `SYSTEM RESTART REPLICAS` for every table on the host.
+
+```sql changes
+SYSTEM RESTART REPLICA DB.TABLENAME;
+SYSTEM RESTORE REPLICA DB.TABLENAME;
+```
+
+For a table that is read-only because its metadata is gone from Keeper ("table metadata was not found in zookeeper"). The restart leaves the table read-only, and the restore rebuilds its Keeper entries from the parts on this disk. It fails with "Replica must be readonly" if the table is healthy. Restore one replica first, then the others. A plain `DETACH TABLE` is refused in a `Replicated` database, so use the restart.
+
+```sql danger
+SYSTEM DROP REPLICA 'REPLICANAME' FROM TABLE DB.TABLENAME
+```
+
+Deletes a dead replica's metadata from Keeper, run on a surviving replica. It refuses an active replica ("because it's active") and the local one. Use it for a host that is gone for good, never one that is only down: that host's unreplicated data is lost to the cluster.
+
+```sh
+echo ruok | nc HOST 9181
+echo mntr | nc HOST 9181
+```
+
+`ruok` prints `imok` (no newline) if Keeper runs; it does not prove a quorum. `mntr` prints one `key value` line per metric: **zk_server_state** (`leader`, `follower` or `standalone`), **zk_outstanding_requests** (near 0), **zk_avg_latency**, and **zk_open_file_descriptor_count** against **zk_max_file_descriptor_count**. Only the leader prints **zk_followers** and **zk_synced_followers**. Port 9181 is the usual client port; both words are allowed by default (`four_letter_word_white_list`).
+
+```sql
+SELECT name, value FROM system.zookeeper WHERE path = (SELECT replica_path FROM system.replicas WHERE database = 'DB' AND table = 'TABLENAME') AND name IN ('is_active', 'is_lost', 'log_pointer', 'host');
+```
+
+This replica's own nodes in Keeper. **is_active** is a UUID while the replica holds a live session and missing when it does not. **is_lost** 1 means the replica fell too far behind and will clone another. Every `system.zookeeper` query must name a `path`.
+
+```sql
+SELECT name, host, port, is_expired, keeper_api_version, client_id FROM system.zookeeper_connection;
+```
+
+The Keeper node this server is connected to. An **is_expired** of 1, or this query failing with `KEEPER_EXCEPTION`, means the server has no session. A **client_id** that changes between runs means the session is being recreated.
+
+### ClickHouse: distributed tables and ON CLUSTER
+
+```sql
+SELECT entry, host, status, exception_code, left(exception_text, 120) AS exception FROM system.distributed_ddl_queue WHERE status != 'Finished' OR exception_code != 0 ORDER BY query_create_time DESC LIMIT 10;
+```
+
+`ON CLUSTER` statements still waiting or failed, one row per host. **status** `Inactive` is a host that has not picked the entry up, because it is down. A non-zero **exception_code** is a host where the statement ran and failed: 81 is `UNKNOWN_DATABASE`, a replica that lacks the database.
+
+```sql
+SELECT cluster, shard_num, replica_num, host_name, port, is_local, errors_count, slowdowns_count, estimated_recovery_time FROM system.clusters WHERE cluster = 'CHCLUSTER';
+```
+
+How this host sees the cluster. A growing **errors_count** with **estimated_recovery_time** above 0 is a host it cannot reach, or one that refuses the login: other hosts are reached as `default` unless the cluster has a `<secret>` or a `<user>` and `<password>`. Distributed queries then skip that replica or fail with `ALL_CONNECTION_TRIES_FAILED`.
+
+```sql
+SELECT database, table, is_blocked, error_count, data_files, broken_data_files, formatReadableSize(data_compressed_bytes) AS size, last_exception FROM system.distribution_queue WHERE data_files > 0 OR error_count > 0 OR broken_data_files > 0;
+```
+
+Data a `Distributed` table accepted but has not yet sent to a shard; the table keeps a row per queue once one exists, so the filter hides the idle ones. Empty is healthy. A growing **data_files** with a **last_exception** means a shard is unreachable or rejecting the data; the files wait on disk and ship when it recovers.
+
+### ClickHouse: disk and TTL
+
+```sql
+SELECT name, path, formatReadableSize(free_space) AS free, formatReadableSize(total_space) AS total, round(free_space / total_space * 100, 1) AS free_pct, formatReadableSize(keep_free_space) AS reserve FROM system.disks;
+```
+
+Space on each disk the server knows. A merge reserves about the size of its source parts and an insert reserves its block, so large merges are skipped as space shrinks and a reservation that fails raises `NOT_ENOUGH_SPACE`. The `system` log tables (`text_log`, `trace_log`, `metric_log`) are the usual bulk: set a `TTL` on them in the server config.
+
+```sql
+SELECT database, table, partition_id, name, reason, disk FROM system.detached_parts;
+```
+
+Parts set aside by a `DETACH`, or by the server when a part is broken, unexpected or covered. An empty **reason** is a manual detach; a reason such as `broken` or `unexpected` came from the server, and those parts still take disk space. Attach a manual one with `ALTER TABLE ... ATTACH PARTITION`.
+
+```sql
+SELECT database, table, name, rows, delete_ttl_info_min, delete_ttl_info_max FROM system.parts WHERE active AND delete_ttl_info_max != toDateTime(0) AND delete_ttl_info_max < now() ORDER BY delete_ttl_info_max LIMIT 10;
+```
+
+Active parts whose newest row is already past its delete TTL, so rows that should be gone. TTL runs only during merges, at most every `merge_with_ttl_timeout` (14400 seconds), so expired data lingers. `ALTER TABLE ... MATERIALIZE TTL` applies it now, but it is a mutation that rewrites every part, so run it off-peak.
+
+### ClickHouse errors
+
+```text
+Code: 241. DB::Exception: Query memory limit exceeded: would use 48.62 MiB (attempt to allocate chunk of 32.00 MiB), maximum: 47.68 MiB: While executing AggregatingTransform. (MEMORY_LIMIT_EXCEEDED)
+```
+
+One query passed `max_memory_usage`. The transform name shows the step: `AggregatingTransform` is a `GROUP BY` or a `DISTINCT` with too many keys. Add a filter, spill with `max_bytes_before_external_group_by`, or raise the limit if the host has the memory. Older releases print "Memory limit (for query) exceeded".
+
+```text
+Code: 241. DB::Exception: (total) memory limit exceeded: would use 3.21 GiB (attempt to allocate chunk of 2.00 GiB), current RSS: 1.13 GiB, maximum: 1.80 GiB. OvercommitTracker decision: Query was selected to stop by OvercommitTracker. Untracked memory across all threads: -16.13 MiB: While executing AggregatingTransform. (MEMORY_LIMIT_EXCEEDED)
+```
+
+The whole server hit `max_server_memory_usage`, so one query was stopped to protect the others. Find what held the memory with `system.processes` and the query log; the limit is 90 percent of RAM or of the container's limit. Older releases print "Memory limit (total) exceeded".
+
+```text
+Code: 252. DB::Exception: Too many parts (8 with average size of 457.00 B) in table 'app.many (514b5775-59fe-4f0a-9e44-1feeb1fbb48b)'. Merges are processing significantly slower than inserts. (TOO_MANY_PARTS)
+```
+
+One partition reached `parts_to_throw_insert`. Inserts are rejected until merges catch up. Batch inserts into fewer, larger ones, use async inserts, and check `system.merges` and the partition key. Raising the limit only delays it.
+
+```text
+Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is controlled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT queries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..
+```
+
+One insert wrote into more than 100 partitions, so the table's partition key is too fine (for example by day or by an ID). Change the key to a coarser one such as the month; raising `max_partitions_per_insert_block` only trades this error for too many parts.
+
+```text
+Code: 243. DB::Exception: Cannot reserve 14.53 MiB, not enough space. (NOT_ENOUGH_SPACE)
+```
+
+The disk cannot hold the insert or merge that needed that much. Check `system.disks` and the biggest tables; free space by dropping old partitions or giving the `system` log tables a TTL. A big merge can fail while small inserts still work.
+
+```text
+Code: 159. DB::Exception: Timeout exceeded: elapsed 1001.134 ms, maximum: 1000.000 ms. (TIMEOUT_EXCEEDED)
+```
+
+A query ran past `max_execution_time` and the server stopped it. Find it in `system.query_log` by its `exception_code`, then fix the query or its key before raising the limit. The same code covers `SYNC REPLICA` and DDL timeouts.
+
+```text
+Code: 242. DB::Exception: Table is in readonly mode: replica_path=/clickhouse/tables/01/app/events/replicas/r1. (TABLE_IS_READ_ONLY)
+```
+
+A replicated table lost its Keeper session. Selects work; inserts, `OPTIMIZE` and `ALTER` fail. Check Keeper with `ruok` and `mntr`; the table returns by itself when the session comes back, or after `SYSTEM RESTART REPLICA`. The "since table metadata was not found in zookeeper" form needs `SYSTEM RESTORE REPLICA`.
+
+```text
+Coordination::Exception: Cannot use any of provided ZooKeeper nodes. (KEEPER_EXCEPTION)
+```
+
+The server cannot reach Keeper, and any replicated `CREATE`, `ON CLUSTER` DDL or `system.zookeeper` query fails. Check that Keeper is running and listening (`ruok`), the `<zookeeper>` host and port in the config, the firewall and DNS. `Connection loss` and `Session expired` are the same family.
+
+```text
+Code: 159. DB::Exception: Distributed DDL task /clickhouse/task_queue/ddl/query-0000000003 is not finished on 1 of 2 hosts (0 of them are currently executing the task, 0 are inactive). They are going to execute the query in background. Was waiting for 5.543 seconds, which is longer than distributed_ddl_task_timeout. (TIMEOUT_EXCEEDED)
+```
+
+An `ON CLUSTER` statement did not finish on every host in time. It is not cancelled: the slow host runs it when it comes back. Find the host in `system.distributed_ddl_queue`. A host rebuilt in the meantime may then fail it (for instance `UNKNOWN_DATABASE`).
+
+```text
+Code: 159. DB::Exception: Wait for async insert timeout (120000 ms) exceeded: While executing WaitForAsyncInsert. (TIMEOUT_EXCEEDED)
+```
+
+An insert with `wait_for_async_insert=1` waited for its batch and the flush never finished. A failed flush returns its own error at once, so a timeout means the flush is stuck, for example waiting on Keeper. Check `system.replicas` and Keeper first, then `system.asynchronous_insert_log`.
+
+```text
+Code: 359. DB::Exception: Table or Partition in app.many was not dropped.
+Reason:
+1. Size (1.47 KB) is greater than max_[table/partition]_size_to_drop (1.00 B)
+```
+
+A `DROP` hit the safety limit (50 GB by default). The message lists the way out. Confirm it is the right table, then create the flag file it names (`force_drop_table`) or raise `max_table_size_to_drop` in the server config; the file is used once.
+
+```text
+Code: 202. DB::Exception: Too many simultaneous queries. Maximum: 1. (TOO_MANY_SIMULTANEOUS_QUERIES)
+```
+
+The server already runs `max_concurrent_queries` queries; the number after Maximum is that setting (1000 by default). A low number is a config choice. Look at `system.processes` for a pile-up of slow queries; killing those frees the slots, and clients need a retry with backoff.
+
+```text
+Code: 516. DB::Exception: Received from localhost:9000. DB::Exception: Received from triage-w-ch-ch2:9000. DB::Exception: default: Authentication failed: password is incorrect, or there is no user with such name
+```
+
+The user or password is wrong. The second "Received from" names the host that refused: without a `<secret>` or a `<user>` and `<password>` in the cluster definition, `clusterAllReplicas` and `Distributed` queries connect to other hosts as `default`, which fails once `default` has a password.
 
 ## Elasticsearch and OpenSearch
 

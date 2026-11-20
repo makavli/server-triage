@@ -47,6 +47,10 @@ export const SHORT = {
   mongodb: 'MongoDB',
   'message-queues': 'Queues',
   'elasticsearch-and-opensearch': 'Search',
+  'terraform-and-opentofu': 'Terraform',
+  'vault-and-openbao': 'Vault',
+  'prometheus-and-alertmanager': 'Prometheus',
+  'opentelemetry-collector': 'OpenTelemetry',
 };
 
 // What the offline cache holds, relative to the app's folder. sw.js itself is cached by the browser.
@@ -62,7 +66,9 @@ export const ENGINES = {
   pg: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', sqlite: 'SQLite', redis: 'Redis',
   valkey: 'Valkey', mongo: 'MongoDB', es: 'Elasticsearch', opensearch: 'OpenSearch', kafka: 'Kafka',
   rabbitmq: 'RabbitMQ', k8s: 'Kubernetes', kernel: 'Linux', systemd: 'systemd', openssl: 'OpenSSL', java: 'Java',
-  node: 'Node.js', python: 'Python',
+  node: 'Node.js', python: 'Python', helm: 'Helm', argocd: 'Argo CD', terraform: 'Terraform', tofu: 'OpenTofu',
+  vault: 'Vault', bao: 'OpenBao', prometheus: 'Prometheus', alertmanager: 'Alertmanager',
+  otelcol: 'OpenTelemetry Collector', clickhouse: 'ClickHouse',
 };
 const VERSION = new RegExp(`^(${Object.keys(ENGINES).join('|')})([0-9]+(?:[.][0-9]+)*)[+]$`);
 
@@ -83,6 +89,12 @@ export const PLACEHOLDERS = {
   PVCNAME: 'PersistentVolumeClaim', INGNAME: 'Ingress', POLNAME: 'NetworkPolicy', IMAGE: 'image reference',
   SRVNAME: 'server in a backend', COLLECTION: 'MongoDB collection', REPLSET: 'replica set name', PGCLUSTER: 'Patroni cluster name', DATADIR: 'data directory', STANZA: 'pgBackRest stanza',
   REPO: 'snapshot repository', SNAPNAME: 'snapshot name',
+  RELEASE: 'Helm release', CHART: 'chart, such as repo/name or oci://...', REV: 'revision number', REGUSER: 'registry user',
+  FROMNS: 'namespace the reference comes from', GWNAME: 'Gateway', ROUTE: 'HTTPRoute',
+  ADDR: 'Terraform resource address, such as aws_instance.web', NEWADDR: 'new resource address', LOCKID: 'state lock ID',
+  WORKSPACE: 'Terraform workspace', VPATH: 'Vault path, such as secret/data/app', VPOLICY: 'Vault policy',
+  ACCESSOR: 'token accessor', LEASEID: 'lease ID', NODEID: 'Raft node ID', JOB: 'Prometheus job label',
+  CHCLUSTER: 'ClickHouse cluster', REPLICANAME: 'ClickHouse replica name', CMNAME: 'ConfigMap',
 };
 const BLANK = new RegExp(`\\b(${Object.keys(PLACEHOLDERS).join('|')})\\b`, 'g');
 

@@ -12,6 +12,7 @@ import { CACHED } from '../tools/build.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const TEST = '.github/workflows/test.yml';
 const CLOSE = '.github/workflows/close-issue.yml';
+const NEIGH = '.github/workflows/neighbours.yml';
 
 // The `run: |` block of a job's step (its first step with one when no step name is given), as the runner gets it.
 function script(file, job, step) {
@@ -123,6 +124,16 @@ test('closing a pull request closes its open issue, and does nothing more when t
   assert.deepEqual(kinds(calls(CLOSE, 'close', {})), ['api']);
 });
 
+test('a red neighbour check opens its issue, comments while red, and the next green run closes it', { skip }, () => {
+  const red = calls(NEIGH, 'issue', { RESULT: 'failure', PR: '' });
+  assert.deepEqual(kinds(red), ['api', 'label create', 'issue create']);
+  assert.match(red[0], /\.title == "The neighbour check failed"/);
+  assert.match(red[2], /--title The neighbour check failed --label ci-failure --body The daily neighbour check failed: /);
+  assert.deepEqual(kinds(calls(NEIGH, 'issue', { RESULT: 'failure', OPEN_ISSUE: '5' })), ['api', 'issue comment']);
+  assert.deepEqual(kinds(calls(NEIGH, 'issue', { RESULT: 'success', OPEN_ISSUE: '5' })), ['api', 'issue close']);
+  assert.deepEqual(kinds(calls(NEIGH, 'issue', { RESULT: 'success' })), ['api']);
+});
+
 test('a merge releases its version once, replaces a draft left behind, and only the head becomes Latest', { skip }, () => {
   const create = (c) => c.find((x) => x.startsWith('release create'));
   const fresh = calls(TEST, 'release', {});
@@ -144,7 +155,7 @@ test('the site gets every file the worker caches, and the worker', { skip }, () 
 });
 
 test('the scripts read their inputs from env, never from an expression', () => {
-  for (const [file, job, step] of [[TEST, 'issue'], [TEST, 'release'], [TEST, 'pages', "Deploy only main's head"], [CLOSE, 'close']]) {
+  for (const [file, job, step] of [[TEST, 'issue'], [TEST, 'release'], [TEST, 'pages', "Deploy only main's head"], [CLOSE, 'close'], [NEIGH, 'issue']]) {
     assert.ok(!script(file, job, step).includes('${{'), `${file}, job ${job}`);
   }
 });

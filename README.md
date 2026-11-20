@@ -8,15 +8,15 @@ A one-page sheet for debugging a broken Linux host, service or database. Each en
 
 ## What's in it
 
-Twenty sections, in the order you debug:
+Twenty-seven sections, in the order you debug:
 
 - **Where to start:** the triage loop, the first minute on a host, and an error decoder.
 - **The host:** services and logs; CPU, memory, disk and files; storage and filesystems.
-- **The way in:** DNS, ports and packets; TLS and certificates; HTTP, proxies and load balancers; containers and Kubernetes; AWS, Google Cloud and Azure.
-- **The app:** JVM, Node.js, Python and Go runtimes; Kafka and RabbitMQ.
-- **The data:** PostgreSQL, MySQL and MariaDB, SQL Server, SQLite, Redis and Valkey, MongoDB, and Elasticsearch and OpenSearch.
+- **The way in:** DNS, ports and packets; TLS and certificates; HTTP, proxies and load balancers; containers and Kubernetes, with the Gateway API; Helm and Argo CD; AWS, Google Cloud and Azure; Terraform and OpenTofu; Vault and OpenBao.
+- **The app:** JVM, Node.js, Python and Go runtimes; Prometheus, Alertmanager and the OpenTelemetry Collector; Kafka and RabbitMQ.
+- **The data:** PostgreSQL, MySQL and MariaDB, SQL Server, SQLite, Redis and Valkey, MongoDB, ClickHouse, and Elasticsearch and OpenSearch.
 
-Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version.
+Written for Linux with systemd (Ubuntu 22.04 and later, RHEL 8 and 9), OpenSSL 3, Kubernetes 1.30 and later, Helm 3 and 4, Argo CD 3, Gateway API 1.3 and later, Terraform 1.17 and OpenTofu 1.13, Vault 2.2 and OpenBao 2.7, Prometheus 3 and Alertmanager 0.28 and later, the OpenTelemetry Collector 0.165, PostgreSQL 14 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, SQL Server 2019 and 2022, SQLite 3.37 and later, Redis 7 and Valkey 8, MongoDB 7 and 8, ClickHouse 25.8 and 26.8, Kafka 3.7 and later (KRaft), RabbitMQ 4, Elasticsearch 8 and OpenSearch 2, JDK 17 and later, Node.js 20 and later, Python 3.9 and later, Go 1.22 and later, and the current AWS, Google Cloud and Azure CLIs. A tag marks a command that needs a newer version.
 
 Commands that read are safe on a live host. A command that changes state carries a **Changes state** tag, and one that can lose data carries **Can lose data**. Other tags name the distribution (Debian and Ubuntu, or the RHEL family) or the oldest version a command needs, such as PostgreSQL 16+.
 
@@ -58,6 +58,8 @@ The page is built from `CHEATSHEET.md`, so a fix to the sheet is a fix to the ap
 2. Run `npm run bump <version>` and write the `CHANGELOG.md` entry. Every merge into main is a release.
 3. Run `npm run build`, then `npm run check`. The check needs Node 22+, and it also runs a headless Chrome or Edge test when one is installed.
 4. Open a pull request. The checks run on Linux and Windows. While they are red, an issue tracks them.
+
+Every GitHub Pages site of one owner shares one origin, so one offline cache store: `npm run neighbours -- OWNER` opens each of the owner's sites headless and fails when one deletes caches it does not own. The `neighbours` workflow runs it every day and opens an issue when it fails.
 
 `npm run icons` redraws the icons. `npm run shots` retakes these pictures headless; the animation also needs ffmpeg.
 

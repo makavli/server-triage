@@ -35,7 +35,8 @@ export async function launch() {
   const profile = mkdtempSync(join(tmpdir(), 'triage-browser-'));
   const args = ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync', 'about:blank'];
   if (process.platform === 'linux' && process.env.GITHUB_ACTIONS) args.push('--no-sandbox'); // GitHub's Linux runners block the sandbox's user namespaces
-  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: true });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/TOKEN|SECRET|PASSWORD/i.test(k))); // a page it opens never meets a credential
+  const proc = spawn(bin, args, { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: true });
   const [input, output] = [proc.stdio[3], proc.stdio[4]];
   let log = ''; // the browser's own last words, for a start that fails
   proc.stderr.setEncoding('utf8');
@@ -114,10 +115,11 @@ export async function launch() {
       if (r.exceptionDetails) throw new Error(`${expression.slice(0, 80)}: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
       return r.result.value;
     }
-    async function load(start) {
+    async function load(start, ready = true) {
       const loaded = next('Page.loadEventFired');
       await start();
       await loaded;
+      if (!ready) return true; // another site's page: it sets no ready flag
       for (let i = 0; i < 100; i++, await delay(50)) if (await evaluate("document.documentElement.dataset.ready === '1'")) return true;
       return false; // the script never ran
     }
@@ -125,7 +127,7 @@ export async function launch() {
       send: s,
       errors,
       evaluate,
-      goto: (url) => load(() => s('Page.navigate', { url })),
+      goto: (url, ready) => load(() => s('Page.navigate', { url }), ready),
       reload: () => load(() => s('Page.reload', { ignoreCache: false })),
       async click(selector, n = 0) { // a real mouse click on the nth match
         const box = await evaluate(`(() => { const el = document.querySelectorAll(${JSON.stringify(selector)})[${n}]; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);

@@ -133,7 +133,7 @@ code { font-family: var(--f-mono); font-size: .875rem; }
 .x > code { background: var(--err-bg); color: var(--err-fg); }
 var { font-style: normal; text-decoration: underline dotted; text-underline-offset: .2em; }
 var.set { color: var(--accent); font-weight: 600; text-decoration-style: solid; }
-.m > p { margin: 0; }
+.m > p { margin: 0; overflow-wrap: anywhere; } /* a long field name, such as a ClickHouse metric, wraps on a phone */
 .m > * + * { margin-top: .4rem; }
 .r p code, .rules code, .loop code, .sub code, .note code { background: var(--code-bg); border-radius: 3px; padding: .05rem .3rem; font-size: .85em; overflow-wrap: anywhere; }
 .r b, .rules b { font-weight: 600; }

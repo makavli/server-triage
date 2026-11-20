@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 (2026-11-20)
+
+- Seven new sections, each command and error string run on the real software: Helm (3.22 and 4.3), Argo CD (3.6), Terraform and OpenTofu (1.17 and 1.13), Vault and OpenBao (2.2 and 2.7, on a three-node Raft cluster), Prometheus and Alertmanager (3.16 and 0.35), the OpenTelemetry Collector (0.165), and ClickHouse (25.8 and 26.8, two replicas with Keeper). The Kubernetes section gains the Gateway API (Envoy Gateway 1.10). Every section was reviewed and each finding checked again on the servers. 1665 entries in all, up from 1334.
+- Setup gets a field for each new placeholder (RELEASE, CHART, ADDR, VPATH, JOB, CHCLUSTER and the others) and a version box for each new tool a tag names.
+- A daily neighbour check: every GitHub Pages site of one owner shares one origin, so one offline cache store. The `neighbours` workflow opens each of the owner's sites in a headless browser and fails, opening an issue, when one deletes caches it does not own. `npm run neighbours -- OWNER` runs it locally.
+
 ## 1.1.3 (2026-11-20)
 
 - The sheet, checked on real servers (MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4, Redis 7.0 to 7.4, Valkey 8, Envoy 1.32, OpenSearch 2.19, containerd 2 on kind, conntrack-tools 1.4.6 to 1.4.8) and against the upstream release notes. Fixed: the `readyz?verbose` filter now works when a check fails (kubectl prints the whole list as one line; the command changed, so a pin or a note on it moves to Your data), when mysqldump needs RELOAD (`--single-transaction` only with GTIDs on and `--set-gtid-purged` not OFF; `--source-data` and `--flush-logs` always), what `FLUSH HOSTS` does on MySQL 8.0 (a deprecation warning), the OpenSearch `_cat/nodes` column (`cluster_manager`, with `master` as an alias), `s_client -brief` (about ten lines), where containerd 2 keeps the pause image, what a current crictl says without a config, and which kernel and conntrack-tools print `chaintoolong`. Said: what Envoy's `config_dump` redacts and what it does not, where Patroni keeps its passwords, that `pg_file_settings` shows a `primary_conninfo` password, and that MariaDB leaves `performance_schema` off. Confirmed as written: the `systemd243+`, `rabbitmq4.0.8+` and `redis7.4+` tags, MariaDB's table, and the 10 days its Docker image keeps binlogs.
