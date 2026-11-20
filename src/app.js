@@ -20,14 +20,17 @@
   function say(msg) {
     toast.textContent = msg;
     toast.classList.add('on');
+    // A manual popover is in the top layer: raised again on each message, it shows above an open Setup panel.
+    if (toast.popover === 'manual') { if (toast.matches(':popover-open')) toast.hidePopover(); toast.showPopover(); }
     status.textContent = msg;
     clearTimeout(timer);
     timer = setTimeout(() => toast.classList.remove('on'), 1800);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Your data: IndexedDB, one record per pin, note and entry, so two open tabs never overwrite each other's work.
-  // Where the browser refuses storage, everything works until the page closes, and Setup says so.
+  // Your data: IndexedDB, one record per pin, note and entry, so two open tabs never overwrite each other's; your values
+  // and your filters are one record each, so there the last tab to change them wins. Where the browser refuses
+  // storage, everything works until the page closes, and Setup says so.
   const db = (() => {
     const STORES = ['pins', 'notes', 'entries', 'prefs'];
     let conn = null;
@@ -36,8 +39,9 @@
       conn ??= new Promise((ok, no) => {
         const r = indexedDB.open('server-triage', 1);
         r.onupgradeneeded = () => { for (const s of STORES) r.result.createObjectStore(s, { keyPath: 'id' }); };
-        r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); ok(r.result); };
-        r.onerror = () => no(r.error);
+        // A connection that closes (another tab upgrades, the browser drops it) or never opens is opened afresh next time.
+        r.onsuccess = () => { const c = r.result; c.onversionchange = () => { c.close(); conn = null; }; c.onclose = () => { conn = null; }; ok(c); };
+        r.onerror = () => { conn = null; no(r.error); };
       });
       return conn;
     }
@@ -71,15 +75,18 @@
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
   const time = (v) => (Number.isFinite(v) ? v : Date.now());
   // Characters a screen hides or reorders (controls, format and bidi marks, spaces that are not the plain one, the
-  // default-ignorables, the Braille blank): the command you paste must be the one you read. A file that holds them is
-  // refused and typing drops them; a value is one line, so tab and newline too. It is the build's HIDDEN (a test checks).
+  // default-ignorables, the Braille blank): the command you paste must be the one you read. An entry, a note or a value
+  // in a file that holds them is left out, and typing drops them; a value is one line, so tab and newline too. It is the
+  // build's HIDDEN (a test checks).
   const IN_CODE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u{2800}]|(?! )\p{Zs}/gu;
   const IN_VALUE = new RegExp(`${IN_CODE.source}|[\t\n]`, 'gu');
   const shown = (v, max, re) => str(v, max) && v.replace(re, '') === v;
   // A value lands in every command you copy, inside shell lines and SQL strings: no quote, space, $, ;, | or glob, no
   // leading - that a command would read as an option, no -- that SQL would read as a comment. Ports and PIDs are digits.
   const SAFE = /^(?!-)(?!.*--)[\w.:/@+=,%-]{1,200}$/;
-  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/ };
+  // A file or a data directory is never the root or the current directory (/, /., .) and never climbs out with a .. step.
+  const PATH = /^(?![/.]+$)(?!(?:.*\/)?\.\.(?:\/|$))(?!-)(?!.*--)[\w.:/@+=,%-]{1,200}$/;
+  const FORMS = { PORT: /^\d{1,5}$/, PID: /^\d{1,10}$/, FILE: PATH, DATADIR: PATH };
   const fits = (k, v) => (FORMS[k] ?? SAFE).test(v);
   const MAX_ENTRIES = 1000;
   function clean(raw) {
@@ -87,11 +94,12 @@
     const f = obj(o.filters);
     return {
       pins: list(o.pins).filter((p) => str(p?.id, 120) && ID.test(p.id)).map((p) => ({ id: p.id, at: time(p.at) })),
-      notes: list(o.notes).filter((n) => str(n?.id, 120) && ID.test(n.id) && str(n.text, 4000) && n.text.trim())
+      notes: list(o.notes).filter((n) => str(n?.id, 120) && ID.test(n.id) && shown(n.text, 4000, IN_CODE) && n.text.trim())
         .map((n) => ({ id: n.id, text: n.text })),
+      // A trailing newline would run the command the moment it is pasted.
       entries: list(o.entries)
-        .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && str(e.text ?? '', 4000))
-        .map((e) => ({ id: e.id, kind: e.kind, code: e.code, text: e.text ?? '', at: time(e.at) })),
+        .filter((e) => str(e?.id, 21) && MINE.test(e.id) && ['cmd', 'err'].includes(e.kind) && shown(e.code, 4000, IN_CODE) && e.code.trim() && shown(e.text ?? '', 4000, IN_CODE))
+        .map((e) => ({ id: e.id, kind: e.kind, code: e.code.replace(/\s+$/, ''), text: e.text ?? '', at: time(e.at) })),
       values: Object.fromEntries(Object.entries(obj(o.values)).filter(([k, v]) => BLANKS.includes(k) && str(v, 200) && fits(k, v))),
       filters: {
         read: f.read === true,
@@ -104,7 +112,7 @@
   function adopt(c) {
     state.pins = new Map(c.pins.map((p) => [p.id, p.at]));
     state.notes = new Map(c.notes.map((n) => [n.id, n.text]));
-    state.entries = new Map(c.entries.map((e) => [e.id, e]));
+    state.entries = new Map(c.entries.slice(0, MAX_ENTRIES).map((e) => [e.id, e])); // a database filled past the cap elsewhere
     state.values = c.values;
     state.filters = c.filters;
   }
@@ -127,9 +135,10 @@
   // Saves in the background; a refusal turns the page into a session-only one, and Setup says so.
   function keep(p) {
     p.then(() => {
+      if (loaded && !state.kept) { state.kept = true; summary(); } // storage works again
       chan?.postMessage('changed');
       if (!persisted) { persisted = true; navigator.storage?.persist?.().catch(() => {}); } // ask once not to be evicted
-    }).catch(() => { state.kept = false; summary(); });
+    }).catch(() => { state.kept = false; summary(); say('Not saved: this browser refused to keep that change'); }); // after the toast that said done
   }
   // A pref is one whole record: written before a load succeeded, it would replace the stored values or filters.
   // shortcut: what is typed before the first load answers is shown but not kept; queue it if that ever matters.
@@ -231,7 +240,10 @@
 
   function showPins() {
     for (const b of $$('main .r[id] [data-act="pin"]')) b.setAttribute('aria-pressed', String(state.pins.has(key(b.closest('.r')))));
+    // A copy with its note editor open stays as it is, so a redraw never drops what you are typing.
+    const editing = new Map($$('.r', pinList).filter((r) => $('.note-edit', r)).map((r) => [r.dataset.ref, r]));
     pinList.replaceChildren(...[...state.pins].sort((a, b) => a[1] - b[1]).map(([id]) => {
+      if (editing.has(id)) return editing.get(id);
       const original = document.getElementById(id);
       if (!original?.matches('main section:not(.own) .r')) return null; // a pin whose entry changed: kept, not shown
       const copy = original.cloneNode(true);
@@ -295,11 +307,30 @@
     for (const a of $$('.toc [data-own]')) a.hidden = !(a.dataset.own === 'pinned' ? pinList.children.length : mineList.children.length);
   }
 
+  // Pins and notes whose entry changed since (a new command makes a new anchor) are not on the sheet: Setup lists them.
+  const lostList = $('#lost-list');
+  const orphans = () => [...new Set([...state.pins.keys(), ...state.notes.keys()])]
+    .filter((id) => !document.getElementById(id)?.matches('main section:not(.own) .r'));
+  function showLost() {
+    const ids = orphans();
+    // A list that changed while Delete these was armed (another tab, an import) needs a new yes: it deletes what it shows.
+    const del = $('#lost-del');
+    if (lostList.dataset.ids !== ids.join(' ') && del.dataset.armed) { clearTimeout(Number(del.dataset.armed)); disarms.get(del)(); }
+    lostList.dataset.ids = ids.join(' ');
+    $('#lost').hidden = !ids.length;
+    lostList.replaceChildren(...ids.map((id) => {
+      const li = document.createElement('li');
+      li.textContent = `${id}: ${state.notes.has(id) ? state.notes.get(id) : 'a pin'}`;
+      return li;
+    }));
+  }
+
   function render() {
     showMine();
     showPins();
     showNotes();
     fill();
+    showLost();
     texts = new WeakMap();
     search();
     summary();
@@ -367,16 +398,18 @@
 
   function search() {
     const words = q.value.toLowerCase().split(/\s+/).filter(Boolean).map(expand);
-    let shown = 0;
-    let held = 0;
+    // Counted once per entry: a pinned copy counts as its original.
+    const matched = new Set();
+    const heldBack = new Set();
     for (const row of $$('main [data-in]')) {
       const text = textOf(row);
       const hit = words.every((alts) => alts.some((w) => text.includes(w)));
       const ok = hit && allowed(row);
-      if (hit && !ok) held++;
+      if (hit && !ok) heldBack.add(key(row) || row);
       row.hidden = !ok;
-      if (ok) shown++;
+      if (ok) matched.add(key(row) || row);
     }
+    const [shown, held] = [matched.size, heldBack.size];
     for (const g of $$('main .grp')) g.hidden = !$('[data-in]:not([hidden])', g);
     for (const s of $$('main section')) s.hidden = !$('.grp:not([hidden])', s) && !(s.id === 'mine' && !form.hidden);
     none.hidden = shown > 0;
@@ -444,7 +477,7 @@
       q.focus();
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      copy(code);
+      if (!e.repeat) copy(code); // a held key copies once
     }
   });
 
@@ -454,7 +487,8 @@
   async function copy(el) {
     try {
       await navigator.clipboard.writeText(el.textContent);
-      say('Copied');
+      const open = [...new Set($$('var:not(.set)', el).map((v) => v.dataset.p))];
+      say(open.length ? `Copied with ${open.join(', ')} still to fill` : 'Copied');
     } catch {
       const range = document.createRange();
       range.selectNodeContents(el);
@@ -489,7 +523,10 @@
     }
     const lost = document.activeElement?.closest('#pinned-list');
     render();
-    if (lost) $(`[id="${id}"] [data-act="pin"]`)?.focus(); // the copy you unpinned from is gone: focus the original
+    if (lost) { // the copy you unpinned from is gone: focus the original, or the search box when it is not shown
+      const original = $(`[id="${id}"] [data-act="pin"]`);
+      if (original && !original.closest('[hidden]')) original.focus(); else q.focus();
+    }
     say(unpin ? 'Unpinned' : 'Pinned to the top');
   }
 
@@ -527,7 +564,7 @@
     });
     edit.addEventListener('submit', (e) => {
       e.preventDefault();
-      const text = area.value.trim();
+      const text = area.value.replace(IN_CODE, '').trim();
       if (text) {
         state.notes.set(id, text);
         keep(db.put('notes', { id, text }));
@@ -544,21 +581,24 @@
 
   // A button that acts on the second click within a few seconds: for deleting, with no dialog in the way. A double-click
   // or a quick second click is one act, not a yes, so the second click counts only after a pause; a held key is below.
+  const disarms = new WeakMap();
   function armed(b, e, ask, act) {
     if (b.dataset.armed) {
       if (e.detail > 1 || performance.now() - Number(b.dataset.at) < 600) return;
       clearTimeout(Number(b.dataset.armed));
-      delete b.dataset.armed;
+      disarms.get(b)(); // the button reads as before once it has acted
       act();
       return;
     }
     const label = b.getAttribute('aria-label');
     const text = b.classList.contains('act') ? null : b.textContent;
-    b.dataset.armed = String(setTimeout(() => {
+    const disarm = () => {
       delete b.dataset.armed;
       if (label) b.setAttribute('aria-label', label);
       if (text) b.textContent = text;
-    }, 4000));
+    };
+    disarms.set(b, disarm);
+    b.dataset.armed = String(setTimeout(disarm, 4000));
     b.dataset.at = String(performance.now());
     if (text) b.textContent = ask; else b.setAttribute('aria-label', ask);
     say(ask);
@@ -591,7 +631,20 @@
   // ---------------------------------------------------------------------------------------------------------------
   // Your entries: the form in their section adds one or edits one.
   const kindName = () => { $('#code-name').textContent = form.elements.kind.value === 'err' ? 'Error or state' : 'Command'; };
+  // A draft is what the open form holds beyond the entry it edits: it is never dropped by one stray key or click.
+  const dirty = () => {
+    const rec = state.entries.get(form.dataset.id);
+    const [kind, code, text] = ['kind', 'code', 'text'].map((k) => form.elements[k].value);
+    return !form.hidden && (kind !== (rec?.kind ?? 'cmd') || code !== (rec?.code ?? '') || text !== (rec?.text ?? ''));
+  };
   function openForm(rec) {
+    if (dirty()) {
+      if ('hidePopover' in setup && setup.matches(':popover-open')) setup.hidePopover();
+      form.scrollIntoView({ block: 'center' });
+      form.elements.code.focus({ preventScroll: true });
+      say('Save or cancel the entry you are writing first');
+      return;
+    }
     form.hidden = false;
     form.dataset.id = rec?.id ?? '';
     form.elements.kind.value = rec?.kind ?? 'cmd';
@@ -607,19 +660,34 @@
   function closeForm() {
     form.reset();
     form.hidden = true;
+    form.elements.code.removeAttribute('aria-invalid');
     search();
   }
   form.addEventListener('change', kindName);
   $('[data-act="cancel"]', form).addEventListener('click', () => { closeForm(); q.focus(); });
-  form.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeForm(); q.focus(); } });
+  // Escape closes the form; with a draft in it, only a second Escape within a few seconds does.
+  let dropAt = -Infinity;
+  form.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing || e.repeat) return;
+    e.preventDefault();
+    if (dirty() && performance.now() - dropAt > 4000) { dropAt = performance.now(); say('Press Escape again to drop your draft'); return; }
+    closeForm();
+    q.focus();
+  });
+  form.elements.code.addEventListener('input', () => form.elements.code.removeAttribute('aria-invalid'));
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const code = form.elements.code.value.replace(IN_CODE, '').replace(/\s+$/, '');
-    if (!code.trim()) { form.elements.code.focus(); return; }
+    if (!code.trim()) {
+      form.elements.code.setAttribute('aria-invalid', 'true');
+      form.elements.code.focus();
+      say(form.elements.kind.value === 'err' ? 'Type the error first' : 'Type a command first');
+      return;
+    }
     const old = state.entries.get(form.dataset.id);
     if (!old && state.entries.size >= MAX_ENTRIES) { say(`${MAX_ENTRIES} entries is the most this page keeps`); return; }
     const hex = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, '0')).join('');
-    const rec = { id: old?.id ?? `mine-${hex}`, kind: form.elements.kind.value === 'err' ? 'err' : 'cmd', code, text: form.elements.text.value.trim(), at: old?.at ?? Date.now() };
+    const rec = { id: old?.id ?? `mine-${hex}`, kind: form.elements.kind.value === 'err' ? 'err' : 'cmd', code, text: form.elements.text.value.replace(IN_CODE, '').trim(), at: old?.at ?? Date.now() };
     state.entries.set(rec.id, rec);
     keep(db.put('entries', rec));
     closeForm();
@@ -644,6 +712,13 @@
       savePref('values');
     });
   }
+  // Leaving a field that holds a refused value shows the one that holds again.
+  setup.addEventListener('change', (e) => {
+    const input = e.target;
+    if (!input.matches('input[data-p], input[data-engine]') || !input.hasAttribute('aria-invalid')) return;
+    input.value = (input.dataset.p ? state.values[input.dataset.p] : state.filters.versions[input.dataset.engine]) ?? '';
+    input.removeAttribute('aria-invalid');
+  });
   const read = $('#f-read');
   const distro = $('#f-distro');
   function filtersChanged() {
@@ -663,12 +738,13 @@
       filtersChanged();
     });
   }
+  // The field you are typing in is left alone: a reload because another tab saved must not take your keystrokes.
   function showSetup() {
-    for (const input of $$('input[data-p]', setup)) input.value = state.values[input.dataset.p] ?? '';
     read.checked = state.filters.read;
     distro.value = state.filters.distro;
-    for (const input of $$('input[data-engine]', setup)) {
-      input.value = state.filters.versions[input.dataset.engine] ?? '';
+    for (const input of $$('input[data-p], input[data-engine]', setup)) {
+      if (input === document.activeElement) continue;
+      input.value = (input.dataset.p ? state.values[input.dataset.p] : state.filters.versions[input.dataset.engine]) ?? '';
       input.removeAttribute('aria-invalid');
     }
   }
@@ -698,25 +774,36 @@
   // from someone else, so one question lists everything it would change first: entries with their code, notes, pins,
   // values and filters.
   const importer = $('#import');
+  const MAX_FILE = 64_000_000; // above the largest export: the most entries and notes this page keeps
+  const engineName = (e) => $(`input[data-engine="${e}"]`, setup)?.closest('.f')?.querySelector('.f-name')?.textContent ?? e;
+  const describe = (f) => [
+    f.read ? 'commands that change state hidden' : 'every command shown',
+    { deb: 'Debian and Ubuntu only', rhel: 'RHEL family only' }[f.distro] ?? 'any Linux',
+    ...Object.entries(f.versions).map(([e, v]) => `${engineName(e)} ${v}`),
+  ].join(', ');
   importer.addEventListener('change', async () => {
     const file = importer.files?.[0];
     importer.value = '';
     if (!file) return;
+    if (file.size > MAX_FILE) { say('That file is over 64 MB, more than an export can be'); return; }
+    let body;
+    try { body = await file.text(); } catch { say('That file could not be read'); return; }
     let raw;
-    try {
-      if (file.size > 5_000_000) throw new Error('too big');
-      raw = JSON.parse(await file.text());
-    } catch {
-      say('That file is not a Server Triage export');
-      return;
-    }
+    try { raw = JSON.parse(body); } catch { say('That file is not a Server Triage export'); return; }
     if (raw?.app !== 'server-triage' || raw.format !== 1) { say('That file is not a Server Triage export'); return; }
+    // Another tab may have changed your data since this one read it: compare with what is stored now. A page whose
+    // saves are refused holds your work only in memory, which a reload would drop.
+    if (loaded && state.kept) { await load(); showSetup(); render(); }
     const c = clean(raw);
     if (state.entries.size + c.entries.filter((e) => !state.entries.has(e.id)).length > MAX_ENTRIES) {
       say(`That file would take you past ${MAX_ENTRIES} entries`);
       return;
     }
     const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+    const size = (v) => (Array.isArray(v) ? v.length : 0);
+    const left = size(raw.pins) + size(raw.notes) + size(raw.entries) + Object.keys(obj(raw.values)).length
+      - c.pins.length - c.notes.length - c.entries.length - Object.keys(c.values).length;
+    const leftOut = `${n(left, 'item', 'items')} in the file left out: hidden characters, a wrong shape, or past what this page keeps`;
     const values = Object.entries(c.values).filter(([k, v]) => state.values[k] !== v);
     const filters = raw.filters !== undefined && JSON.stringify(c.filters) !== JSON.stringify(state.filters);
     const pins = c.pins.filter((p) => !state.pins.has(p.id)).length;
@@ -725,25 +812,36 @@
     const same = (a, b) => a && a.kind === b.kind && a.code === b.code && a.text === b.text;
     const entries = c.entries.filter((e) => !same(state.entries.get(e.id), e));
     const newEntries = entries.filter((e) => !state.entries.has(e.id)).length;
-    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say('Nothing new in that file'); return; }
+    if (!entries.length && !notes.length && !pins && !values.length && !filters) { say(left ? `Nothing new in that file; ${leftOut}` : 'Nothing new in that file'); return; }
     const ask = [`Import ${file.name.replace(IN_VALUE, '').slice(0, 60)}?`];
-    if (entries.length) {
-      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. Each copies as shown:`);
-      // Whole code, never a cut line (the cut part could be what runs), and a long run of blanks is counted, not shown.
-      // Past what a dialog holds, the rest is named, not hidden.
-      let room = 3000;
+    // Whole texts, never a cut line (the cut part could be what runs), and a long run of blanks is counted, not shown.
+    // Past what a dialog holds, the rest is named, not hidden.
+    let room = 3000;
+    const show = (items, text) => {
       let listed = 0;
-      for (const e of entries) {
-        if ((room -= e.code.length) < 0) break;
-        ask.push('', ...e.code.split('\n').map((l) => `  ${l.replace(/[ \t]{8,}/g, (s) => ` [${s.length} blanks] `)}`));
+      for (const it of items) {
+        if ((room -= text(it).length) < 0) break;
+        // A run of empty lines is counted too, so it cannot push the code below what the dialog shows.
+        const body = text(it).replace(/\n(?:[ \t]*\n){2,}/g, (s) => `\n[${s.split('\n').length - 2} empty lines]\n`);
+        ask.push('', ...body.split('\n').map((l) => `  ${l.replace(/[ \t]{8,}/g, (s) => ` [${s.length} blanks] `)}`));
         listed++;
       }
-      if (listed < entries.length) ask.push('', `${n(entries.length - listed, 'more entry does', 'more entries do')} not fit here: read them under Your entries before you copy one.`);
+      return items.length - listed;
+    };
+    if (entries.length) {
+      ask.push('', `Entries: ${newEntries} added, ${entries.length - newEntries} of yours replaced. Each copies as shown:`);
+      const more = show(entries, (e) => e.code);
+      if (more) ask.push('', `${n(more, 'more entry does', 'more entries do')} not fit here: read them under Your entries before you copy one.`);
     }
-    if (notes.length) ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced.`);
+    if (notes.length) {
+      ask.push('', `Notes: ${newNotes} added, ${notes.length - newNotes} of yours replaced:`);
+      const more = show(notes, (x) => x.text);
+      if (more) ask.push('', `${n(more, 'more note does', 'more notes do')} not fit here: read them on the sheet.`);
+    }
     if (pins) ask.push('', `${n(pins, 'pin', 'pins')} added.`);
     if (values.length) ask.push('', 'These values go into every command you copy:', ...values.map(([k, v]) => `${k} = ${v}`));
-    if (filters) ask.push('', "Your filters are replaced by the file's.");
+    if (filters) ask.push('', `Your filters become the file's: ${describe(c.filters)}.`);
+    if (left) ask.push('', `${leftOut}.`);
     if (!window.confirm(ask.join('\n'))) { say('Nothing imported'); return; }
     for (const p of c.pins) if (!state.pins.has(p.id)) state.pins.set(p.id, p.at);
     for (const n of c.notes) state.notes.set(n.id, n.text);
@@ -761,7 +859,7 @@
     }));
     showSetup();
     render();
-    say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}`);
+    say(`Imported ${n(c.pins.length, 'pin', 'pins')}, ${n(c.notes.length, 'note', 'notes')} and ${n(c.entries.length, 'entry', 'entries')}${left ? `; ${n(left, 'item', 'items')} left out` : ''}`);
   });
 
   $('#wipe').addEventListener('click', (e) => {
@@ -771,6 +869,16 @@
       showSetup();
       render();
       say('Your data is deleted');
+    });
+  });
+
+  $('#lost-del').addEventListener('click', (e) => {
+    armed(e.currentTarget, e, 'Click again to delete these', () => {
+      const ids = orphans();
+      for (const id of ids) { state.pins.delete(id); state.notes.delete(id); }
+      keep(db.batch((s) => { for (const id of ids) { s('pins').delete(id); s('notes').delete(id); } }));
+      render();
+      say(`${ids.length === 1 ? 'It is' : 'They are'} deleted`);
     });
   });
 
@@ -790,14 +898,18 @@
       }
       return;
     }
+    if (!el.matches('main .r, main section:not(.own)')) return; // a part of the page, not a place on the sheet
+    const filtered = 'Your filters in Setup hide that entry';
+    if (el.matches('.r') && !allowed(el)) { say(filtered); return; } // known before the search is cleared for nothing
     if (el.closest('[hidden]') && q.value) { q.value = ''; search(); }
-    if (el.closest('[hidden]')) { say('Your filters in Setup hide that entry'); return; }
+    if (el.closest('[hidden]')) { say(filtered); return; }
     el.scrollIntoView({ block: 'start' });
     if (el.matches('.r')) $('code', el)?.focus({ preventScroll: true });
   }
   addEventListener('hashchange', go);
 
-  chan?.addEventListener('message', () => load().then(() => { showSetup(); render(); }));
+  // Another tab saved: read it in, unless this page's saves are refused and its work lives only in memory.
+  chan?.addEventListener('message', () => { if (state.kept) load().then(() => { showSetup(); render(); }); });
 
   // ---------------------------------------------------------------------------------------------------------------
   // The app's manifest and offline copy, over http(s) only: a page opened from disk is offline already, and the

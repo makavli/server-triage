@@ -97,7 +97,7 @@ const TOGGLES = [[/stopBalancer/, /startBalancer/], [/REPLICAOF NO ONE/, /REPLIC
 // The ids render() gives the page's own parts: a section slug may not take one.
 export const FIXED_IDS = ['main', 'q', 'install', 'none', 'status', 'toast', 'setup', 'setup-btn', 'setup-on', 'pinned',
   'pinned-list', 'mine', 'mine-list', 'mine-form', 'add-entry', 'export', 'import', 'wipe', 'data-sum', 'f-read',
-  'f-distro', 'store-note', 'setup-h', 'pinned-h', 'mine-h', 'mine-form-h', 'code-name'];
+  'f-distro', 'store-note', 'setup-h', 'pinned-h', 'mine-h', 'mine-form-h', 'code-name', 'lost', 'lost-list', 'lost-del'];
 
 // An entry's anchor: its section and the first bytes of its code's hash, so a link holds while the command does.
 export const entryId = (section, code) => `${section}-${createHash('sha256').update(code, 'utf8').digest('hex').slice(0, 6)}`;
@@ -171,6 +171,8 @@ export function parse(md) {
       section = { title: m[1].trim(), slug: slug(m[1]), lede: [], groups: [] };
       if (!section.slug) fail(n, 'a section title needs a letter or a digit');
       if (FIXED_IDS.includes(section.slug)) fail(n, `a section may not be called "${section.slug}": the page uses that id`);
+      // The page keeps a pin or a note only for an id of this shape, and its entries' ids add 7 characters (at most 120).
+      if (!/^[a-z0-9][a-z0-9-]{0,112}$/.test(section.slug) || section.slug.startsWith('mine-')) fail(n, `a section title makes the id "${section.slug}": use a-z, 0-9 and -, at most 113 characters, not starting with mine-`);
       doc.sections.push(section);
       group = null;
       i++;
@@ -383,6 +385,12 @@ ${s.groups.map((g) => group(g, s)).join('\n')}
         <label class="btn" for="import">Import</label><input class="sr" type="file" id="import" accept=".json,application/json">
         <button class="btn danger" type="button" id="wipe">Delete my data</button>
       </div>
+      <p class="note-line">An export holds your values and your notes: share it only where they may be read.</p>
+      <div id="lost" hidden>
+        <p class="note-line">Pins and notes for entries that changed since, which the sheet no longer shows:</p>
+        <ul id="lost-list" class="lost"></ul>
+        <div class="btns"><button class="btn danger" type="button" id="lost-del">Delete these</button></div>
+      </div>
     </div>
   </div>
 </div>
@@ -425,7 +433,7 @@ ${doc.intro.slice(1).map((p) => `    <p>${inline(p)}</p>`).join('\n')}
   </div>
 </footer>
 
-<div id="toast" class="toast" aria-hidden="true"></div>
+<div id="toast" class="toast" popover="manual" aria-hidden="true"></div>
 <script>${script}</script>
 </body>
 </html>
