@@ -34,7 +34,7 @@ export async function launch() {
   if (!existsSync(bin)) throw new Error(`No browser at ${bin}: fix BROWSER_BIN.`);
   const profile = mkdtempSync(join(tmpdir(), 'triage-browser-'));
   const args = ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync', 'about:blank'];
-  if (process.platform === 'linux' && process.env.CI) args.push('--no-sandbox'); // CI containers have no user namespaces
+  if (process.platform === 'linux' && process.env.GITHUB_ACTIONS) args.push('--no-sandbox'); // GitHub's Linux runners block the sandbox's user namespaces
   const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: true });
   const [input, output] = [proc.stdio[3], proc.stdio[4]];
   let log = ''; // the browser's own last words, for a start that fails

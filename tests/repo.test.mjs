@@ -86,7 +86,7 @@ test('no machine left a trace: no home folders, public addresses, e-mails or key
 });
 
 test('only the app and its sources ship: text, and PNGs of image data only', () => {
-  const image = ['IHDR', 'PLTE', 'IDAT', 'IEND', 'sRGB', 'gAMA', 'cHRM', 'pHYs', 'tRNS', 'sBIT', 'bKGD'];
+  const image = ['IHDR', 'PLTE', 'IDAT', 'IEND', 'sRGB', 'gAMA', 'cHRM', 'pHYs', 'tRNS', 'sBIT', 'bKGD', 'acTL', 'fcTL', 'fdAT']; // the last three: an animated PNG's frames
   for (const file of all) {
     const size = statSync(join(root, file)).size;
     if (file.endsWith('.png')) {
