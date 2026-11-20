@@ -35,8 +35,11 @@ export async function launch() {
   const profile = mkdtempSync(join(tmpdir(), 'triage-browser-'));
   const args = ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync', 'about:blank'];
   if (process.platform === 'linux' && process.env.CI) args.push('--no-sandbox'); // CI containers have no user namespaces
-  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], windowsHide: true });
+  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: true });
   const [input, output] = [proc.stdio[3], proc.stdio[4]];
+  let log = ''; // the browser's own last words, for a start that fails
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', (chunk) => { log = (log + chunk).slice(-3000); });
 
   let id = 0;
   let gone = null;
@@ -71,12 +74,13 @@ export async function launch() {
   });
 
   try {
-    await Promise.race([send('Browser.getVersion'), cap(20000).then(() => { throw new Error('timed out waiting for the browser to start'); })]);
+    // A cold CI machine can take long over a first start.
+    await Promise.race([send('Browser.getVersion'), cap(60000).then(() => { throw new Error('timed out waiting for the browser to start'); })]);
   } catch (e) {
     proc.kill();
     if (proc.exitCode === null && !gone) await Promise.race([new Promise((ok) => proc.once('exit', ok)), cap(5000)]);
     await remove(profile);
-    throw e;
+    throw new Error(`${e.message} (${bin})${log.trim() ? `\nIts stderr ends with:\n${log.trim()}` : ''}`);
   }
 
   async function page({ width = 1280, height = 860 } = {}) {
